@@ -24,7 +24,15 @@ class TelegramSender:
             for signal in signals:
                 pair = signal["pair"]
                 drop = signal["drop_percent"]
-                current_price = signal.get("current_price", 0)  # Получаем текущую цену
+                current_price = signal.get("current_price")
+                
+                # Проверяем что цена передана
+                if current_price is None or current_price <= 0:
+                    print(f"[WARNING] {pair}: current_price not provided or invalid ({current_price}), skipping price in message")
+                    price_str = "N/A"
+                else:
+                    # Форматируем цену: если < 1, показываем 4 знака после запятой, иначе 2
+                    price_str = f"{current_price:.4f}€" if current_price < 1 else f"{current_price:.2f}€"
                 
                 # Форматируем пару: BTCEUR -> BTC/EUR
                 formatted_pair = pair.replace("EUR", "") + "/EUR"
@@ -32,9 +40,6 @@ class TelegramSender:
                 # Формируем текст сигнала: 💎 FARTCOIN/EUR | −4.6% | 0.0874€
                 # drop уже отрицательный, используем длинный минус (U+2212)
                 drop_abs = abs(drop)
-                
-                # Форматируем цену: если < 1, показываем 4 знака после запятой, иначе 2
-                price_str = f"{current_price:.4f}€" if current_price < 1 else f"{current_price:.2f}€"
                 
                 signals_text.append(f"💎 {formatted_pair} | −{drop_abs:.1f}% | {price_str}")
                 
