@@ -48,7 +48,7 @@ class CryptoSignalBot:
             f"🤖 <b>Bot Started</b>\n\n"
             f"📊 Monitoring: <b>{len(pairs)}</b> EUR pairs\n"
             f"⏱ Interval: {CHECK_INTERVAL} sec\n"
-            f"📈 Levels: -4%, -7%, -11%, -16%, -22%\n"
+            f"📈 Levels: -5%, -9%, -13%, -17%, -21%\n"
             f"🕐 {datetime.now().strftime('%H:%M:%S %d.%m.%Y')}"
         )
         
@@ -206,9 +206,21 @@ class CryptoSignalBot:
                         change_str = f"{price_change:+.2f}%" if last_price and last_price > 0 else "N/A"
                         print(f"  {idx}. {pair}: {drop:.2f}% drop | price={price:.4f} (was {last_str} {change_str}) | max={max_price:.4f} | levels={levels_str}")
                 
-                # Защита от дублирования в одном цикле - сигналы уже проверены в check_pair
-                # Просто отправляем все сигналы, которые вернул check_pair
-                filtered_signals = cycle_signals
+                # ЗАЩИТА ОТ ДУБЛИРОВАНИЯ: двойная проверка перед отправкой
+                # Перечитываем состояние для каждого сигнала, чтобы убедиться, что уровень не сработал
+                filtered_signals = []
+                for signal in cycle_signals:
+                    pair = signal["pair"]
+                    level = signal["level"]
+                    
+                    # Проверяем актуальное состояние из StateManager
+                    current_state = self.state_manager.get_state(pair)
+                    triggered = current_state.get("triggered_levels", [])
+                    
+                    if level not in triggered:
+                        filtered_signals.append(signal)
+                    else:
+                        print(f"[SKIP DUPLICATE] {pair}: Level {level} already in triggered_levels {triggered}")
                 
                 # Отправляем все сигналы одним сообщением
                 if filtered_signals:
@@ -304,9 +316,7 @@ class CryptoSignalBot:
             pair,
             current_price,
             current_state["local_max"],
-            current_state["triggered_levels"],  # Используем актуальный список
-            local_max_time=current_state.get("local_max_time"),  # Время установки максимума для проверки ограничений
-            current_time=current_time  # Текущее время для проверки ограничений
+            current_state["triggered_levels"]  # Используем актуальный список
         )
         
         # Подсчёт мониторинга (пара инициализирована и активно мониторится, нет сигналов)
@@ -321,7 +331,14 @@ class CryptoSignalBot:
             level = signal["level"]
             drop = signal["drop_percent"]
             
-            # Сохраняем сработавший уровень (чтобы не было повторных сигналов в следующих циклах)
+            # КРИТИЧЕСКИ ВАЖНО: Проверяем ЕЩЁ РАЗ, что уровень не сработал
+            # (защита от race condition между проверкой в check_levels и сохранением)
+            final_check = self.state_manager.get_state(pair)
+            if level in final_check.get("triggered_levels", []):
+                print(f"[SKIP RACE] {pair}: Level {level} was just added by another check, skipping")
+                return None
+            
+            # Сохраняем сработавший уровень НЕМЕДЛЕННО (чтобы не было повторных сигналов)
             self.state_manager.add_triggered_level(pair, level, current_time)
             
             print(f"[!!!] {pair}: Level {level} | {drop:.2f}% | Price: {current_price:.4f}")

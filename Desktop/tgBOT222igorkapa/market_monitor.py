@@ -218,7 +218,7 @@ class MarketMonitor:
         """Получить текущую цену пары из кэша"""
         return self.prices_cache.get(pair)
     
-    def check_levels(self, pair: str, current_price: float, local_max: float, triggered_levels: List[int], local_max_time: float = None, current_time: float = None) -> Optional[Dict]:
+    def check_levels(self, pair: str, current_price: float, local_max: float, triggered_levels: List[int]) -> Optional[Dict]:
         """Проверить, не пересечён ли новый уровень падения
         
         Args:
@@ -226,8 +226,6 @@ class MarketMonitor:
             current_price: Текущая цена
             local_max: Локальный максимум
             triggered_levels: Список уже сработавших уровней
-            local_max_time: Время установки локального максимума (для проверки времени падения)
-            current_time: Текущее время (для проверки времени падения)
         """
         if local_max is None or local_max == 0:
             return None
@@ -237,26 +235,13 @@ class MarketMonitor:
         for level_info in LEVELS:
             level = level_info["level"]
             threshold = level_info["drop"]
-            time_limit = level_info.get("time_limit")  # None для Level 3-5
             
             # Если уровень уже сработал, пропускаем
             if level in triggered_levels:
                 continue
             
-            # Если падение достигло этого уровня
+            # Если падение достигло этого уровня - возвращаем сигнал
             if drop_percent <= threshold:
-                # Для Level 1 и 2 проверяем ограничение по времени
-                if time_limit is not None and local_max_time is not None and current_time is not None:
-                    # Вычисляем время с момента установки максимума
-                    time_since_max = current_time - local_max_time
-                    if time_since_max > time_limit:
-                        # Время превышено - не отправляем сигнал и не помечаем уровень
-                        # Это важно: уровень НЕ помечается как сработавший, чтобы не "сжечь" его навсегда
-                        time_limit_min = time_limit / 60
-                        elapsed_min = time_since_max / 60
-                        print(f"[SKIP] {pair}: Level {level} ({drop_percent:.2f}%) - time limit exceeded ({elapsed_min:.1f}m > {time_limit_min:.0f}m). Signal NOT sent, level NOT marked.")
-                        continue
-                
                 return {
                     "level": level,
                     "drop_percent": drop_percent,
