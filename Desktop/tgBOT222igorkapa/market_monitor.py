@@ -23,7 +23,28 @@ class MarketMonitor:
             url = f"{BIT2ME_BASE_URL}/ticker?t={int(time.time())}"
             response = requests.get(url, headers=self.headers, timeout=5)
             response.raise_for_status()
-            return response.json()
+            
+            # Проверяем что ответ не пустой
+            if not response.text:
+                print(f"[ERROR] API returned empty response. Status: {response.status_code}")
+                return {}
+            
+            # Проверяем что это JSON
+            try:
+                data = response.json()
+                if isinstance(data, dict) and len(data) > 0:
+                    return data
+                else:
+                    print(f"[ERROR] API returned invalid data format. Response preview: {response.text[:200]}")
+                    return {}
+            except ValueError as json_err:
+                print(f"[ERROR] API did not return valid JSON. Status: {response.status_code}")
+                print(f"[ERROR] Response preview: {response.text[:200]}")
+                print(f"[ERROR] JSON error: {json_err}")
+                return {}
+        except requests.exceptions.RequestException as e:
+            print(f"[ERROR] Network error fetching tickers: {e}")
+            return {}
         except Exception as e:
             print(f"[ERROR] Failed to fetch tickers: {e}")
             return {}
