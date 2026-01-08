@@ -8,14 +8,10 @@ class MarketMonitor:
     """Мониторинг рынка криптовалют через Bit2Me API"""
     
     def __init__(self):
-        # Ticker endpoint не требует аутентификации, но оставляем заголовки для совместимости
         self.headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "CryptoSignalBot/1.0"
+            "X-Bit2Me-Key": BIT2ME_API_KEY,
+            "Content-Type": "application/json"
         }
-        # Если нужен API ключ для других endpoints, используем:
-        # if BIT2ME_API_KEY:
-        #     self.headers["X-Bit2Me-Key"] = BIT2ME_API_KEY
         self.available_pairs = []
         self.prices_cache = {}  # Кэш цен для текущего цикла
     
@@ -24,8 +20,8 @@ class MarketMonitor:
         try:
             # Добавляем timestamp для предотвращения кэширования
             import time
-            # Публичный endpoint для получения всех тикеров
-            url = f"{BIT2ME_BASE_URL}/ticker"
+            # Добавляем timestamp для предотвращения кэширования
+            url = f"{BIT2ME_BASE_URL}/ticker?t={int(time.time())}"
             response = requests.get(url, headers=self.headers, timeout=5)
             response.raise_for_status()
             
