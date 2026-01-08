@@ -206,28 +206,11 @@ class CryptoSignalBot:
                         change_str = f"{price_change:+.2f}%" if last_price and last_price > 0 else "N/A"
                         print(f"  {idx}. {pair}: {drop:.2f}% drop | price={price:.4f} (was {last_str} {change_str}) | max={max_price:.4f} | levels={levels_str}")
                 
-                # ЗАЩИТА ОТ ДУБЛИРОВАНИЯ: двойная проверка перед отправкой
-                # Перечитываем состояние для каждого сигнала, чтобы убедиться, что уровень не сработал
-                filtered_signals = []
-                for signal in cycle_signals:
-                    pair = signal["pair"]
-                    level = signal["level"]
-                    
-                    # Проверяем актуальное состояние из StateManager
-                    current_state = self.state_manager.get_state(pair)
-                    triggered = current_state.get("triggered_levels", [])
-                    
-                    if level not in triggered:
-                        filtered_signals.append(signal)
-                    else:
-                        print(f"[SKIP DUPLICATE] {pair}: Level {level} already in triggered_levels {triggered}")
-                
                 # Отправляем все сигналы одним сообщением
-                if filtered_signals:
-                    self.telegram.send_signals_batch(filtered_signals)
-                    print(f"[SIGNALS] Sent {len(filtered_signals)} signals in one message")
-                elif cycle_signals:
-                    print(f"[WARNING] All {len(cycle_signals)} signals were duplicates, nothing sent")
+                # (защита от дублей уже в check_pair и check_levels)
+                if cycle_signals:
+                    self.telegram.send_signals_batch(cycle_signals)
+                    print(f"[SIGNALS] Sent {len(cycle_signals)} signals in one message")
                 
                 print(f"\n[OK] Cycle complete. Waiting {CHECK_INTERVAL} sec...")
                 time.sleep(CHECK_INTERVAL)
