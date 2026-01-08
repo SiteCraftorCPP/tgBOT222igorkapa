@@ -206,10 +206,31 @@ class CryptoSignalBot:
                         change_str = f"{price_change:+.2f}%" if last_price and last_price > 0 else "N/A"
                         print(f"  {idx}. {pair}: {drop:.2f}% drop | price={price:.4f} (was {last_str} {change_str}) | max={max_price:.4f} | levels={levels_str}")
                 
+                # Защита от дублирования: проверяем актуальное состояние перед отправкой
+                # Перезагружаем состояния из файла для гарантии актуальности (на случай, если файл был изменён в другом процессе)
+                try:
+                    self.state_manager.load_states()
+                except Exception as e:
+                    print(f"[WARNING] Failed to reload states before sending: {e}")
+                
+                filtered_signals = []
+                for signal in cycle_signals:
+                    pair = signal["pair"]
+                    level = signal["level"]
+                    # Проверяем актуальное состояние - уровень не должен быть уже triggered
+                    current_state = self.state_manager.get_state(pair)
+                    triggered_levels = current_state.get("triggered_levels", [])
+                    if level not in triggered_levels:
+                        filtered_signals.append(signal)
+                    else:
+                        print(f"[SKIP DUPLICATE] {pair}: Level {level} already in triggered_levels {triggered_levels}, skipping")
+                
                 # Отправляем все сигналы одним сообщением
-                if cycle_signals:
-                    self.telegram.send_signals_batch(cycle_signals)
-                    print(f"[SIGNALS] Sent {len(cycle_signals)} signals in one message")
+                if filtered_signals:
+                    self.telegram.send_signals_batch(filtered_signals)
+                    print(f"[SIGNALS] Sent {len(filtered_signals)} signals in one message")
+                elif cycle_signals:
+                    print(f"[WARNING] All {len(cycle_signals)} signals were duplicates, nothing sent")
                 
                 print(f"\n[OK] Cycle complete. Waiting {CHECK_INTERVAL} sec...")
                 time.sleep(CHECK_INTERVAL)
@@ -315,13 +336,21 @@ class CryptoSignalBot:
             level = signal["level"]
             drop = signal["drop_percent"]
             
-            # Сначала сохраняем сработавший уровень (чтобы не было повторных сигналов)
+            # ВАЖНО: Сначала проверяем, что уровень действительно ещё не сработал
+            # (дополнительная защита на случай race condition)
+            current_state_check = self.state_manager.get_state(pair)
+            if level in current_state_check.get("triggered_levels", []):
+                print(f"[SKIP] {pair}: Level {level} already in triggered_levels, skipping signal")
+                return None
+            
+            # Сохраняем сработавший уровень (чтобы не было повторных сигналов)
             self.state_manager.add_triggered_level(pair, level, current_time)
             
             # Убеждаемся, что уровень добавлен в текущее состояние (для проверки в этом же цикле)
             updated_state = self.state_manager.get_state(pair)
             if level not in updated_state["triggered_levels"]:
                 print(f"[ERROR] Level {level} not saved for {pair}!")
+                return None  # Не отправляем сигнал, если не удалось сохранить
             
             print(f"[!!!] {pair}: Level {level} | {drop:.2f}% | Price: {current_price:.4f}")
             

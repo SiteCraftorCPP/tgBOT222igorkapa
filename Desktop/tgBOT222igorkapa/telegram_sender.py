@@ -37,8 +37,8 @@ class TelegramSender:
                 # drop уже отрицательный, используем длинный минус (U+2212)
                 drop_abs = abs(drop)
                 
-                # Делаем COMPRAR кликабельной ссылкой
-                signals_text.append(f"🚀 {formatted_pair} | −{drop_abs:.1f}% | [COMPRAR]({buy_url})")
+                # COMPRAR - просто текст без ссылки
+                signals_text.append(f"🚀 {formatted_pair} | −{drop_abs:.1f}% | COMPRAR")
             
             # Объединяем все сигналы
             message = "\n".join(signals_text)
