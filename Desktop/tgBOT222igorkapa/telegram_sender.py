@@ -24,8 +24,11 @@ class TelegramSender:
                 pair = signal["pair"]
                 drop = signal["drop_percent"]
                 
-                # Реферальная ссылка для регистрации на Bit2Me
-                buy_url = "https://bit2me.com/es/registro?prm=REFNAV25&utm_medium=app&utm_source=new_ref&utm_campaign=referidossnavidad25&mkt_kind=referral&code=OIA-CKO-CM5"
+                # Реферальная ссылка для регистрации на Bit2Me (временно отключена)
+                # buy_url = "https://bit2me.com/es/registro?prm=REFNAV25&utm_medium=app&utm_source=new_ref&utm_campaign=referidossnavidad25&mkt_kind=referral&code=OIA-CKO-CM5"
+                # Временно используем обычную ссылку на покупку
+                coin = pair.replace("EUR", "").lower()
+                buy_url = f"https://bit2me.com/es/precio/{coin}"
                 
                 # Форматируем пару: BTCEUR -> BTC/EUR
                 formatted_pair = pair.replace("EUR", "") + "/EUR"
