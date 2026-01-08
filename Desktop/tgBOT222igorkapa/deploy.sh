@@ -35,9 +35,9 @@ else
 fi
 
 # 2. Установка зависимостей системы
-echo "[2/7] Installing system dependencies..."
+echo "[2/8] Installing system dependencies..."
 apt update -qq
-apt install -y python3 python3-pip git curl -qq
+apt install -y python3 python3-pip python3-venv git curl -qq
 
 # 3. Проверка файлов проекта
 echo "[3/7] Checking project files..."
@@ -49,10 +49,20 @@ if [ ! -f "bot.py" ] || [ ! -f "state_manager.py" ] || [ ! -f "market_monitor.py
 fi
 echo "  ✅ All Python files present"
 
-# 4. Установка Python зависимостей
-echo "[4/7] Installing Python dependencies..."
+# 4. Создание виртуального окружения
+echo "[4/8] Creating Python virtual environment..."
+if [ ! -d "venv" ]; then
+    python3 -m venv venv
+    echo "  ✅ Virtual environment created"
+else
+    echo "  ✅ Virtual environment already exists"
+fi
+
+# 5. Установка Python зависимостей
+echo "[5/8] Installing Python dependencies..."
 if [ -f "requirements.txt" ]; then
-    pip3 install -r requirements.txt --quiet
+    ./venv/bin/pip install --upgrade pip --quiet
+    ./venv/bin/pip install -r requirements.txt --quiet
     echo "  ✅ Dependencies installed"
 else
     echo "[ERROR] requirements.txt not found in $(pwd)!"
@@ -67,8 +77,8 @@ if [ ! -f "bot.py" ] || [ ! -f "state_manager.py" ] || [ ! -f "market_monitor.py
 fi
 echo "  ✅ All Python files present"
 
-# 5. Проверка конфига
-echo "[5/7] Checking configuration..."
+# 6. Проверка конфига
+echo "[6/8] Checking configuration..."
 if [ ! -f "config.py" ]; then
     if [ -f "config.example.py" ]; then
         echo "[WARNING] config.py not found! Copying from config.example.py..."
@@ -84,8 +94,8 @@ else
     echo "  ✅ config.py exists"
 fi
 
-# 6. Установка systemd service
-echo "[6/7] Installing systemd service..."
+# 7. Установка systemd service
+echo "[7/9] Installing systemd service..."
 if [ ! -f "$SERVICE_FILE" ]; then
     echo "[ERROR] $SERVICE_FILE not found!"
     exit 1
@@ -96,19 +106,19 @@ sed -i "s|WorkingDirectory=.*|WorkingDirectory=$BOT_DIR|g" /etc/systemd/system/c
 sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $BOT_DIR/bot.py|g" /etc/systemd/system/cryptobot.service
 systemctl daemon-reload
 
-# 7. Предварительная проверка Python кода
-echo "[7/8] Validating Python code..."
+# 8. Предварительная проверка Python кода
+echo "[8/9] Validating Python code..."
 if python3 -m py_compile bot.py state_manager.py market_monitor.py telegram_sender.py 2>/dev/null; then
     echo "  ✅ Python syntax check passed"
 else
     echo "  ⚠️  Python syntax check had warnings (continuing anyway)"
 fi
 
-# 8. Запуск сервиса
-echo "[8/8] Starting service..."
-# Обновляем пути в service файле перед копированием
+# 9. Запуск сервиса
+echo "[9/9] Starting service..."
+# Обновляем пути в service файле перед копированием (используем venv Python)
 sed -i "s|WorkingDirectory=.*|WorkingDirectory=$BOT_DIR|g" "$SERVICE_FILE" 2>/dev/null || true
-sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $BOT_DIR/bot.py|g" "$SERVICE_FILE" 2>/dev/null || true
+sed -i "s|ExecStart=.*|ExecStart=$BOT_DIR/venv/bin/python3 $BOT_DIR/bot.py|g" "$SERVICE_FILE" 2>/dev/null || true
 systemctl enable cryptobot
 systemctl restart cryptobot
 
