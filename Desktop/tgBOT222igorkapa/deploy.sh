@@ -40,7 +40,7 @@ apt update -qq
 apt install -y python3 python3-pip python3-venv git curl -qq
 
 # 3. Проверка файлов проекта
-echo "[3/7] Checking project files..."
+echo "[3/8] Checking project files..."
 if [ ! -f "bot.py" ] || [ ! -f "state_manager.py" ] || [ ! -f "market_monitor.py" ] || [ ! -f "telegram_sender.py" ]; then
     echo "[ERROR] Required Python files not found in $(pwd)!"
     echo "Current directory contents:"
@@ -71,11 +71,6 @@ else
     ls -la
     exit 1
 fi
-if [ ! -f "bot.py" ] || [ ! -f "state_manager.py" ] || [ ! -f "market_monitor.py" ] || [ ! -f "telegram_sender.py" ]; then
-    echo "[ERROR] Required Python files not found!"
-    exit 1
-fi
-echo "  ✅ All Python files present"
 
 # 6. Проверка конфига
 echo "[6/8] Checking configuration..."
@@ -101,14 +96,14 @@ if [ ! -f "$SERVICE_FILE" ]; then
     exit 1
 fi
 cp "$SERVICE_FILE" /etc/systemd/system/cryptobot.service
-# Обновляем пути в service файле если нужно
+# Обновляем пути в service файле (используем venv Python)
 sed -i "s|WorkingDirectory=.*|WorkingDirectory=$BOT_DIR|g" /etc/systemd/system/cryptobot.service
-sed -i "s|ExecStart=.*|ExecStart=/usr/bin/python3 $BOT_DIR/bot.py|g" /etc/systemd/system/cryptobot.service
+sed -i "s|ExecStart=.*|ExecStart=$BOT_DIR/venv/bin/python3 $BOT_DIR/bot.py|g" /etc/systemd/system/cryptobot.service
 systemctl daemon-reload
 
 # 8. Предварительная проверка Python кода
 echo "[8/9] Validating Python code..."
-if python3 -m py_compile bot.py state_manager.py market_monitor.py telegram_sender.py 2>/dev/null; then
+if ./venv/bin/python3 -m py_compile bot.py state_manager.py market_monitor.py telegram_sender.py 2>/dev/null; then
     echo "  ✅ Python syntax check passed"
 else
     echo "  ⚠️  Python syntax check had warnings (continuing anyway)"
