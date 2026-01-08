@@ -49,7 +49,7 @@ def test_single_signal():
         "disable_web_page_preview": True,
         "reply_markup": {
             "inline_keyboard": [[{
-                "text": f"🚀 COMPRAR {formatted_pair}",
+                "text": "🚀 COMPRAR",
                 "url": buy_url
             }]]
         }
@@ -58,7 +58,7 @@ def test_single_signal():
     print(f"Chat ID: {TELEGRAM_CHAT_ID}")
     print(f"Message: {message}")
     print(f"Buy URL: {buy_url}")
-    print(f"Button text: 🚀 COMPRAR {formatted_pair}")
+    print(f"Button text: 🚀 COMPRAR")
     print("\nОтправка запроса...")
     
     try:
@@ -137,7 +137,7 @@ def test_batch_signals():
                 "disable_web_page_preview": True,
                 "reply_markup": {
                     "inline_keyboard": [[{
-                        "text": f"🚀 COMPRAR {formatted_pair}",
+                        "text": "🚀 COMPRAR",
                         "url": buy_url
                     }]]
                 }
@@ -267,7 +267,7 @@ def test_message_format():
         
         coin = pair.replace("EUR", "").lower()
         buy_url = f"https://bit2me.com/es/precio/{coin}"
-        button_text = f"🚀 COMPRAR {formatted_pair}"
+        button_text = "🚀 COMPRAR"
         
         print(f"\n{i}. {message}")
         print(f"   URL: {buy_url}")

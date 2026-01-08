@@ -53,7 +53,7 @@ class TelegramSender:
                     "disable_web_page_preview": True,
                     "reply_markup": {
                         "inline_keyboard": [[{
-                            "text": f"🚀 COMPRAR {formatted_pair}",
+                            "text": "🚀 COMPRAR",
                             "url": buy_url
                         }]]
                     }
