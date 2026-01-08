@@ -48,7 +48,7 @@ class CryptoSignalBot:
             f"🤖 <b>Bot Started</b>\n\n"
             f"📊 Monitoring: <b>{len(pairs)}</b> EUR pairs\n"
             f"⏱ Interval: {CHECK_INTERVAL} sec\n"
-            f"📈 Levels: -5%, -9%, -13%, -17%, -21%\n"
+            f"📈 Levels: -8%, -12%, -16%, -20%, -24%\n"
             f"🕐 {datetime.now().strftime('%H:%M:%S %d.%m.%Y')}"
         )
         
@@ -369,7 +369,8 @@ class CryptoSignalBot:
             return {
                 "pair": pair,
                 "drop_percent": drop,
-                "level": level
+                "level": level,
+                "current_price": current_price  # Добавляем текущую цену для отображения в сообщении
             }
         else:
             return None

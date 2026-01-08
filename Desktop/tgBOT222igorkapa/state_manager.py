@@ -110,19 +110,19 @@ class StateManager:
     def get_reset_percent_for_level(self, max_level: int) -> float:
         """Получить процент отскока для RESET в зависимости от максимального достигнутого уровня"""
         # Чем глубже падение, тем больший отскок нужен:
-        # Level 1 (-4%): RESET на +2%
-        # Level 2 (-7%): RESET на +3%
-        # Level 3 (-11%): RESET на +4%
-        # Level 4 (-16%): RESET на +5%
-        # Level 5 (-22%): RESET на +6%
+        # Level 1 (-8%): RESET на +3%
+        # Level 2 (-12%): RESET на +4%
+        # Level 3 (-16%): RESET на +5%
+        # Level 4 (-20%): RESET на +6%
+        # Level 5 (-24%): RESET на +7%
         reset_map = {
-            1: 2.0,
-            2: 3.0,
-            3: 4.0,
-            4: 5.0,
-            5: 6.0
+            1: 3.0,
+            2: 4.0,
+            3: 5.0,
+            4: 6.0,
+            5: 7.0
         }
-        return reset_map.get(max_level, 2.0)  # По умолчанию 2% если уровни не сработали
+        return reset_map.get(max_level, 3.0)  # По умолчанию 3% если уровни не сработали
     
     def should_reset(self, pair: str, current_price: float, current_time: float) -> bool:
         """Проверка условий для сброса состояния"""

@@ -12,33 +12,39 @@ class TelegramSender:
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
     
     def send_signals_batch(self, signals: list):
-        """Отправить список сигналов одним сообщением"""
+        """Отправить список сигналов одним сообщением с инлайн кнопками"""
         if not signals:
             return
         
         try:
             # Формируем список сигналов в столбик
             signals_text = []
+            inline_buttons = []
             
             for signal in signals:
                 pair = signal["pair"]
                 drop = signal["drop_percent"]
-                
-                # Реферальная ссылка для регистрации на Bit2Me (временно отключена)
-                # buy_url = "https://bit2me.com/es/registro?prm=REFNAV25&utm_medium=app&utm_source=new_ref&utm_campaign=referidossnavidad25&mkt_kind=referral&code=OIA-CKO-CM5"
-                # Временно используем обычную ссылку на покупку
-                coin = pair.replace("EUR", "").lower()
-                buy_url = f"https://bit2me.com/es/precio/{coin}"
+                current_price = signal.get("current_price", 0)  # Получаем текущую цену
                 
                 # Форматируем пару: BTCEUR -> BTC/EUR
                 formatted_pair = pair.replace("EUR", "") + "/EUR"
                 
-                # Формируем текст сигнала: 🚀 SOL/EUR | −11% | COMPRAR
+                # Формируем текст сигнала: 💎 FARTCOIN/EUR | −4.6% | 0.0874€
                 # drop уже отрицательный, используем длинный минус (U+2212)
                 drop_abs = abs(drop)
                 
-                # COMPRAR - просто текст без ссылки
-                signals_text.append(f"🚀 {formatted_pair} | −{drop_abs:.1f}% | COMPRAR")
+                # Форматируем цену: если < 1, показываем 4 знака после запятой, иначе 2
+                price_str = f"{current_price:.4f}€" if current_price < 1 else f"{current_price:.2f}€"
+                
+                signals_text.append(f"💎 {formatted_pair} | −{drop_abs:.1f}% | {price_str}")
+                
+                # Создаём инлайн кнопку для каждого сигнала
+                coin = pair.replace("EUR", "").lower()
+                buy_url = f"https://bit2me.com/es/precio/{coin}"
+                inline_buttons.append([{
+                    "text": f"🚀 COMPRAR {formatted_pair}",
+                    "url": buy_url
+                }])
             
             # Объединяем все сигналы
             message = "\n".join(signals_text)
@@ -47,7 +53,10 @@ class TelegramSender:
                 "chat_id": self.chat_id,
                 "text": message,
                 "parse_mode": "Markdown",
-                "disable_web_page_preview": True
+                "disable_web_page_preview": True,
+                "reply_markup": {
+                    "inline_keyboard": inline_buttons
+                }
             }
             
             response = requests.post(
@@ -57,7 +66,7 @@ class TelegramSender:
             )
             response.raise_for_status()
             
-            print(f"[BATCH SIGNALS SENT] {len(signals)} signals in one message")
+            print(f"[BATCH SIGNALS SENT] {len(signals)} signals in one message with inline buttons")
             return True
         except Exception as e:
             print(f"[ERROR] Failed to send batch signals: {e}")
