@@ -57,6 +57,7 @@ class StateManager:
                 "local_min": None,
                 "triggered_levels": [],
                 "last_signal_time": None,
+                "last_signal_level": None,  # Последний отправленный уровень (для защиты от дублей)
                 "last_price": None,
                 "last_update": time.time(),
                 "initialized": False,  # Флаг инициализации (не отправлять сигналы сразу)
@@ -81,6 +82,7 @@ class StateManager:
             "local_min": new_price,
             "triggered_levels": [],
             "last_signal_time": None,
+            "last_signal_level": None,  # Сбрасываем последний отправленный уровень
             "last_price": new_price,
             "last_update": current_time,
             "initialized": True,  # После RESET считаем инициализированным
@@ -160,4 +162,5 @@ class StateManager:
         if level not in state["triggered_levels"]:
             state["triggered_levels"].append(level)
             state["last_signal_time"] = current_time
+            state["last_signal_level"] = level  # Сохраняем последний отправленный уровень
             self.save_states()

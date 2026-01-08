@@ -206,11 +206,48 @@ class CryptoSignalBot:
                         change_str = f"{price_change:+.2f}%" if last_price and last_price > 0 else "N/A"
                         print(f"  {idx}. {pair}: {drop:.2f}% drop | price={price:.4f} (was {last_str} {change_str}) | max={max_price:.4f} | levels={levels_str}")
                 
-                # Отправляем все сигналы одним сообщением
-                # (защита от дублей уже в check_pair и check_levels)
-                if cycle_signals:
-                    self.telegram.send_signals_batch(cycle_signals)
-                    print(f"[SIGNALS] Sent {len(cycle_signals)} signals in one message")
+                # ФИНАЛЬНАЯ ПРОВЕРКА ПЕРЕД ОТПРАВКОЙ: защита от дублей между циклами
+                # Перепроверяем каждый сигнал на актуальность прямо перед отправкой
+                final_signals = []
+                for signal in cycle_signals:
+                    pair = signal["pair"]
+                    level = signal["level"]
+                    
+                    # Получаем СВЕЖЕЕ состояние прямо перед отправкой
+                    fresh_state = self.state_manager.get_state(pair)
+                    triggered = fresh_state.get("triggered_levels", [])
+                    last_signal_time = fresh_state.get("last_signal_time")
+                    last_signal_level = fresh_state.get("last_signal_level")
+                    
+                    # Проверка 1: уровень не должен быть уже в triggered_levels
+                    if level in triggered:
+                        print(f"[SKIP DUPLICATE] {pair}: Level {level} already in triggered_levels: {triggered}")
+                        continue
+                    
+                    # Проверка 2: не отправляем тот же уровень повторно в течение 10 минут
+                    # (если последний сигнал был для того же уровня недавно - это дубль)
+                    if last_signal_time and last_signal_level == level:
+                        time_since = int(current_time - last_signal_time)
+                        if time_since < 600:  # 10 минут (600 секунд)
+                            print(f"[SKIP DUPLICATE] {pair}: Level {level} was sent {time_since}s ago (same level, min 10min required)")
+                            continue
+                    
+                    # Проверка прошла - добавляем сигнал
+                    final_signals.append(signal)
+                
+                # Отправляем только проверенные сигналы
+                if final_signals:
+                    # ПОСЛЕ успешной отправки добавляем уровни в triggered_levels
+                    self.telegram.send_signals_batch(final_signals)
+                    print(f"[SIGNALS] Sent {len(final_signals)}/{len(cycle_signals)} signals (filtered {len(cycle_signals) - len(final_signals)} duplicates)")
+                    
+                    # Теперь сохраняем сработавшие уровни
+                    for signal in final_signals:
+                        pair = signal["pair"]
+                        level = signal["level"]
+                        self.state_manager.add_triggered_level(pair, level, current_time)
+                elif cycle_signals:
+                    print(f"[WARNING] All {len(cycle_signals)} signals were filtered as duplicates, nothing sent")
                 
                 print(f"\n[OK] Cycle complete. Waiting {CHECK_INTERVAL} sec...")
                 time.sleep(CHECK_INTERVAL)
@@ -321,8 +358,9 @@ class CryptoSignalBot:
                 print(f"[SKIP RACE] {pair}: Level {level} was just added by another check, skipping")
                 return None
             
-            # Сохраняем сработавший уровень НЕМЕДЛЕННО (чтобы не было повторных сигналов)
-            self.state_manager.add_triggered_level(pair, level, current_time)
+            # НЕ добавляем уровень в triggered_levels ЗДЕСЬ!
+            # Добавим его только ПОСЛЕ успешной отправки в main_loop
+            # Это предотвращает дублирование между циклами
             
             print(f"[!!!] {pair}: Level {level} | {drop:.2f}% | Price: {current_price:.4f}")
             
