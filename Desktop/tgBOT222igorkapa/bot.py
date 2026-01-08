@@ -216,21 +216,12 @@ class CryptoSignalBot:
                     # Получаем СВЕЖЕЕ состояние прямо перед отправкой
                     fresh_state = self.state_manager.get_state(pair)
                     triggered = fresh_state.get("triggered_levels", [])
-                    last_signal_time = fresh_state.get("last_signal_time")
-                    last_signal_level = fresh_state.get("last_signal_level")
                     
-                    # Проверка 1: уровень не должен быть уже в triggered_levels
+                    # ЕДИНСТВЕННАЯ ПРОВЕРКА: уровень не должен быть уже в triggered_levels
+                    # (check_levels уже проверил это, но на случай если между циклами что-то изменилось)
                     if level in triggered:
                         print(f"[SKIP DUPLICATE] {pair}: Level {level} already in triggered_levels: {triggered}")
                         continue
-                    
-                    # Проверка 2: не отправляем тот же уровень повторно в течение 10 минут
-                    # (если последний сигнал был для того же уровня недавно - это дубль)
-                    if last_signal_time and last_signal_level == level:
-                        time_since = int(current_time - last_signal_time)
-                        if time_since < 600:  # 10 минут (600 секунд)
-                            print(f"[SKIP DUPLICATE] {pair}: Level {level} was sent {time_since}s ago (same level, min 10min required)")
-                            continue
                     
                     # Проверка прошла - добавляем сигнал
                     final_signals.append(signal)
@@ -238,16 +229,25 @@ class CryptoSignalBot:
                 # Отправляем только проверенные сигналы
                 if final_signals:
                     # ПОСЛЕ успешной отправки добавляем уровни в triggered_levels
+                    print(f"[SENDING] Preparing to send {len(final_signals)}/{len(cycle_signals)} signals")
                     self.telegram.send_signals_batch(final_signals)
-                    print(f"[SIGNALS] Sent {len(final_signals)}/{len(cycle_signals)} signals (filtered {len(cycle_signals) - len(final_signals)} duplicates)")
+                    print(f"[SIGNALS SENT] Sent {len(final_signals)} signals successfully")
                     
-                    # Теперь сохраняем сработавшие уровни
+                    # Теперь сохраняем сработавшие уровни ПОСЛЕ успешной отправки
                     for signal in final_signals:
                         pair = signal["pair"]
                         level = signal["level"]
                         self.state_manager.add_triggered_level(pair, level, current_time)
+                        print(f"[LEVEL SAVED] {pair}: Level {level} added to triggered_levels")
                 elif cycle_signals:
                     print(f"[WARNING] All {len(cycle_signals)} signals were filtered as duplicates, nothing sent")
+                    # Диагностика: почему все сигналы были отфильтрованы?
+                    for signal in cycle_signals:
+                        pair = signal["pair"]
+                        level = signal["level"]
+                        fresh_state = self.state_manager.get_state(pair)
+                        triggered = fresh_state.get("triggered_levels", [])
+                        print(f"[DEBUG] {pair} Level {level}: filtered because in triggered_levels: {triggered}")
                 
                 print(f"\n[OK] Cycle complete. Waiting {CHECK_INTERVAL} sec...")
                 time.sleep(CHECK_INTERVAL)
@@ -354,15 +354,16 @@ class CryptoSignalBot:
             # КРИТИЧЕСКИ ВАЖНО: Проверяем ЕЩЁ РАЗ, что уровень не сработал
             # (защита от race condition между проверкой в check_levels и сохранением)
             final_check = self.state_manager.get_state(pair)
-            if level in final_check.get("triggered_levels", []):
-                print(f"[SKIP RACE] {pair}: Level {level} was just added by another check, skipping")
+            triggered_in_check = final_check.get("triggered_levels", [])
+            if level in triggered_in_check:
+                print(f"[SKIP RACE] {pair}: Level {level} already in triggered_levels: {triggered_in_check}")
                 return None
             
             # НЕ добавляем уровень в triggered_levels ЗДЕСЬ!
             # Добавим его только ПОСЛЕ успешной отправки в main_loop
             # Это предотвращает дублирование между циклами
             
-            print(f"[!!!] {pair}: Level {level} | {drop:.2f}% | Price: {current_price:.4f}")
+            print(f"[SIGNAL CREATED] {pair}: Level {level} | {drop:.2f}% | Price: {current_price:.4f} | triggered_levels: {triggered_in_check}")
             
             # Возвращаем сигнал для отправки батчем
             return {
