@@ -90,9 +90,9 @@ def test_single_signal():
 
 
 def test_batch_signals():
-    """Тест отправки нескольких сигналов одним сообщением"""
+    """Тест отправки нескольких сигналов - каждый отдельным сообщением (как в реальном боте)"""
     print("\n" + "="*60)
-    print("ТЕСТ 2: Отправка батча сигналов (как в реальном боте)")
+    print("ТЕСТ 2: Отправка батча сигналов - каждый отдельным сообщением")
     print("="*60)
     
     base_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
@@ -100,86 +100,87 @@ def test_batch_signals():
     # Тестовые сигналы
     test_signals = [
         {"pair": "ETHEUR", "drop_percent": -12.3, "current_price": 2450.75},
-        {"pair": "SOL/EUR", "drop_percent": -16.8, "current_price": 0.0874},
+        {"pair": "SOLEUR", "drop_percent": -16.8, "current_price": 0.0874},
         {"pair": "ADAEUR", "drop_percent": -20.5, "current_price": 0.4523}
     ]
     
-    signals_text = []
-    inline_buttons = []
-    
-    for signal in test_signals:
-        pair = signal["pair"].replace("/", "")  # Убираем / если есть
-        drop = signal["drop_percent"]
-        current_price = signal["current_price"]
-        
-        # Форматируем пару: BTCEUR -> BTC/EUR
-        formatted_pair = pair.replace("EUR", "") + "/EUR"
-        
-        # Форматируем цену
-        price_str = f"{current_price:.4f}€" if current_price < 1 else f"{current_price:.2f}€"
-        
-        signals_text.append(f"💎 {formatted_pair} | −{abs(drop):.1f}% | {price_str}")
-        
-        # Создаём инлайн кнопку
-        coin = pair.replace("EUR", "").lower()
-        buy_url = f"https://bit2me.com/es/precio/{coin}"
-        inline_buttons.append([{
-            "text": f"🚀 COMPRAR {formatted_pair}",
-            "url": buy_url
-        }])
-    
-    message = "\n".join(signals_text)
-    
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": True,
-        "reply_markup": {
-            "inline_keyboard": inline_buttons
-        }
-    }
-    
     print(f"Chat ID: {TELEGRAM_CHAT_ID}")
     print(f"Signals count: {len(test_signals)}")
-    print(f"Message:\n{message}")
-    print(f"Buttons count: {len(inline_buttons)}")
-    print("\nОтправка запроса...")
+    print("Отправка каждого сигнала отдельным сообщением...\n")
     
-    try:
-        response = requests.post(
-            f"{base_url}/sendMessage",
-            json=payload,
-            timeout=10
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("ok"):
-                print("✅ УСПЕХ! Батч сигналов отправлен в канал")
-                print(f"Message ID: {result.get('result', {}).get('message_id')}")
-                return True
-            else:
-                print(f"❌ ОШИБКА: {result.get('description', 'Unknown error')}")
-                print(f"Error code: {result.get('error_code')}")
-                return False
-        else:
-            print(f"❌ ОШИБКА HTTP {response.status_code}")
-            print(f"Response: {response.text}")
-            try:
-                error_data = response.json()
-                print(f"Error details: {json.dumps(error_data, indent=2, ensure_ascii=False)}")
-            except:
-                pass
-            return False
+    sent_count = 0
+    failed_count = 0
+    message_ids = []
+    
+    for i, signal in enumerate(test_signals, 1):
+        try:
+            pair = signal["pair"].replace("/", "")  # Убираем / если есть
+            drop = signal["drop_percent"]
+            current_price = signal["current_price"]
             
-    except Exception as e:
-        print(f"❌ ИСКЛЮЧЕНИЕ: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+            # Форматируем пару: BTCEUR -> BTC/EUR
+            formatted_pair = pair.replace("EUR", "") + "/EUR"
+            
+            # Форматируем цену
+            price_str = f"{current_price:.4f}€" if current_price < 1 else f"{current_price:.2f}€"
+            
+            message = f"💎 {formatted_pair} | −{abs(drop):.1f}% | {price_str}"
+            
+            # Создаём инлайн кнопку
+            coin = pair.replace("EUR", "").lower()
+            buy_url = f"https://bit2me.com/es/precio/{coin}"
+            
+            payload = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "parse_mode": "Markdown",
+                "disable_web_page_preview": True,
+                "reply_markup": {
+                    "inline_keyboard": [[{
+                        "text": f"🚀 COMPRAR {formatted_pair}",
+                        "url": buy_url
+                    }]]
+                }
+            }
+            
+            print(f"[{i}/{len(test_signals)}] Отправка: {message}")
+            print(f"         URL: {buy_url}")
+            
+            response = requests.post(
+                f"{base_url}/sendMessage",
+                json=payload,
+                timeout=10
+            )
+            
+            print(f"         Status Code: {response.status_code}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("ok"):
+                    msg_id = result.get('result', {}).get('message_id')
+                    message_ids.append(msg_id)
+                    print(f"         ✅ Успешно! Message ID: {msg_id}\n")
+                    sent_count += 1
+                else:
+                    print(f"         ❌ ОШИБКА: {result.get('description', 'Unknown error')}\n")
+                    failed_count += 1
+            else:
+                print(f"         ❌ ОШИБКА HTTP {response.status_code}")
+                print(f"         Response: {response.text}\n")
+                failed_count += 1
+                
+        except Exception as e:
+            print(f"         ❌ ИСКЛЮЧЕНИЕ: {e}\n")
+            failed_count += 1
+    
+    print("="*60)
+    print(f"ИТОГИ: Отправлено {sent_count}/{len(test_signals)} сигналов")
+    if failed_count > 0:
+        print(f"Ошибок: {failed_count}")
+    if message_ids:
+        print(f"Message IDs: {', '.join(map(str, message_ids))}")
+    
+    return sent_count == len(test_signals)
 
 
 def test_telegram_connection():
