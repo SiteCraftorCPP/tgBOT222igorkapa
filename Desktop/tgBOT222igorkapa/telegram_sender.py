@@ -1,5 +1,7 @@
 import requests
 import time
+import json
+import os
 from urllib.parse import quote
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
@@ -7,8 +9,10 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 class TelegramSender:
     """Отправка сигналов в Telegram"""
     
-    # Время блокировки дублей (в секундах) - 10 минут
-    DUPLICATE_BLOCK_TIME = 600
+    # Время блокировки дублей по (pair, level) - 10 минут (для защиты от race condition)
+    # Одинаковые сообщения блокируются навсегда (проверка по тексту)
+    DUPLICATE_BLOCK_TIME = 600  # Для (pair, level) - временная защита
+    MESSAGE_BLOCK_FOREVER = True  # Одинаковые сообщения блокируются навсегда
     
     def __init__(self):
         self.bot_token = TELEGRAM_BOT_TOKEN
@@ -16,44 +20,184 @@ class TelegramSender:
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
         
         # КЭШ ОТПРАВЛЕННЫХ СИГНАЛОВ - последняя линия защиты от дублей
-        # Формат: {(pair, level): timestamp}
-        self.sent_signals_cache = {}
+        # Формат: {"msg:текст": float('inf'), (pair, level): timestamp}
+        self.cache_file = "sent_messages_cache.json"
+        self.sent_signals_cache = self._load_cache()
     
-    def _is_duplicate(self, pair: str, level: int) -> bool:
-        """Проверить, не был ли этот сигнал уже отправлен недавно"""
-        key = (pair, level)
+    def _is_duplicate(self, pair: str, level: int, drop_percent: float = None, current_price: float = None) -> bool:
+        """Проверить, не был ли этот сигнал уже отправлен
+        
+        КРИТИЧЕСКИ ВАЖНО: Одинаковые сообщения блокируются НАВСЕГДА!
+        Если изменился уровень падения (процент), то это уже другое сообщение и оно пройдёт.
+        """
         current_time = time.time()
         
-        print(f"[DUPLICATE CHECK] {pair} Level {level}: checking cache (size={len(self.sent_signals_cache)})")
-        print(f"[DUPLICATE CHECK] Cache keys: {list(self.sent_signals_cache.keys())}")
+        # Проверка 1: по тексту сообщения (ГЛАВНАЯ ПРОВЕРКА - блокирует одинаковые сообщения навсегда)
+        # Если уровень падения изменился, текст изменится, и сообщение пройдёт
+        if drop_percent is not None and current_price is not None:
+            # Формируем текст сообщения ТОЧНО так же, как в send_signals_batch
+            formatted_pair = pair.replace("EUR", "") + "/EUR"
+            drop_abs = abs(drop_percent)
+            # ВАЖНО: Форматирование должно быть ИДЕНТИЧНЫМ с send_signals_batch!
+            # Проверяем на None, <= 0, или очень маленькое значение (близко к 0)
+            if current_price is None or current_price <= 0 or current_price < 0.0001:
+                price_str = "N/A"
+            else:
+                price_str = f"{current_price:.4f}€" if current_price < 1 else f"{current_price:.2f}€"
+            message_text = f"💎 {formatted_pair} | −{drop_abs:.1f}% | {price_str}"
+            
+            # Проверяем по тексту сообщения - если уже было, блокируем НАВСЕГДА
+            message_key = f"msg:{message_text}"
+            print(f"[DUPLICATE CHECK] {pair}: checking message_text='{message_text}', cache_size={len(self.sent_signals_cache)}")
+            
+            if message_key in self.sent_signals_cache:
+                # Если значение float('inf'), значит блокировка навсегда
+                # Если обычное значение, проверяем время (но это не должно быть, т.к. мы используем float('inf'))
+                cache_value = self.sent_signals_cache[message_key]
+                print(f"[DUPLICATE CHECK] {pair}: FOUND in cache! cache_value={cache_value}")
+                
+                if cache_value == float('inf'):
+                    print(f"[DUPLICATE BLOCKED] ❌ {pair}: ОДИНАКОВОЕ сообщение уже отправлено (блок навсегда): {message_text}")
+                    return True
+                # На всякий случай проверяем и обычные значения (если они есть)
+                elif isinstance(cache_value, (int, float)) and cache_value != float('inf'):
+                    if current_time - cache_value < 86400:  # 24 часа для старых записей
+                        print(f"[DUPLICATE BLOCKED] ❌ {pair}: одинаковое сообщение уже отправлено: {message_text}")
+                        return True
+            else:
+                print(f"[DUPLICATE CHECK] {pair}: NOT in cache, will send")
         
+        # Проверка 2: по ключу (pair, level) - временная защита от race condition (10 минут)
+        key = (pair, level)
         if key in self.sent_signals_cache:
             last_sent = self.sent_signals_cache[key]
             elapsed = current_time - last_sent
             
-            print(f"[DUPLICATE CHECK] Found in cache: last_sent={last_sent}, elapsed={elapsed:.1f}s, block_time={self.DUPLICATE_BLOCK_TIME}s")
-            
             if elapsed < self.DUPLICATE_BLOCK_TIME:
                 minutes = elapsed / 60
-                print(f"[DUPLICATE BLOCKED] ❌ {pair} Level {level}: уже отправлен {minutes:.1f} мин назад (блок на {self.DUPLICATE_BLOCK_TIME/60:.0f} мин)")
+                print(f"[DUPLICATE BLOCKED] ❌ {pair} Level {level}: уже отправлен {minutes:.1f} мин назад (временная защита)")
                 return True
-            else:
-                print(f"[DUPLICATE CHECK] ✅ {pair} Level {level}: elapsed ({elapsed:.1f}s) >= block_time ({self.DUPLICATE_BLOCK_TIME}s), NOT a duplicate")
-        else:
-            print(f"[DUPLICATE CHECK] ✅ {pair} Level {level}: NOT in cache, NOT a duplicate")
         
         return False
     
-    def _mark_as_sent(self, pair: str, level: int):
-        """Отметить сигнал как отправленный"""
-        key = (pair, level)
-        self.sent_signals_cache[key] = time.time()
+    def _load_cache(self) -> dict:
+        """Загрузить кэш отправленных сообщений из файла"""
+        if os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    cache = json.load(f)
+                    # Конвертируем ключи обратно (JSON не поддерживает tuple, сохраняем как строки)
+                    result = {}
+                    for k, v in cache.items():
+                        if k.startswith("msg:"):
+                            result[k] = float('inf') if v == 'inf' else v
+                        elif k.startswith("tuple:"):
+                            # Восстанавливаем tuple из строки "tuple:(pair,level)"
+                            key_str = k.replace("tuple:", "")
+                            try:
+                                pair, level_str = key_str.strip("()").split(",")
+                                level = int(level_str.strip())
+                                result[(pair.strip("'\" "), level)] = v
+                            except:
+                                pass
+                        else:
+                            result[k] = v
+                    print(f"[CACHE] Loaded {len(result)} entries from {self.cache_file}")
+                    return result
+            except Exception as e:
+                print(f"[CACHE ERROR] Failed to load cache: {e}")
+        return {}
+    
+    def _save_cache(self):
+        """Сохранить кэш отправленных сообщений в файл"""
+        try:
+            # Конвертируем для JSON (tuple -> строка)
+            cache_to_save = {}
+            for k, v in self.sent_signals_cache.items():
+                if isinstance(k, tuple):
+                    cache_to_save[f"tuple:{k}"] = v
+                elif isinstance(k, str):
+                    # Сохраняем float('inf') как строку 'inf'
+                    cache_to_save[k] = 'inf' if v == float('inf') else v
+                else:
+                    cache_to_save[str(k)] = v
+            
+            temp_file = self.cache_file + ".tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_to_save, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            
+            if os.path.exists(self.cache_file):
+                os.replace(temp_file, self.cache_file)
+            else:
+                os.rename(temp_file, self.cache_file)
+        except Exception as e:
+            print(f"[CACHE ERROR] Failed to save cache: {e}")
+    
+    def clear_cache_for_pair(self, pair: str):
+        """Очистить кэш сообщений для конкретной пары (вызывается при RESET)"""
+        removed_count = 0
         
-        # Очистка старых записей (старше 1 часа)
+        # Удаляем все записи по ключу (pair, level)
+        keys_to_remove = [k for k in self.sent_signals_cache.keys() 
+                         if isinstance(k, tuple) and k[0] == pair]
+        for k in keys_to_remove:
+            del self.sent_signals_cache[k]
+            removed_count += 1
+        
+        # Удаляем все записи по тексту сообщения для этой пары
+        formatted_pair = pair.replace("EUR", "") + "/EUR"
+        message_keys_to_remove = [k for k in self.sent_signals_cache.keys() 
+                                  if isinstance(k, str) and k.startswith("msg:") 
+                                  and formatted_pair in k]
+        for k in message_keys_to_remove:
+            del self.sent_signals_cache[k]
+            removed_count += 1
+        
+        if removed_count > 0:
+            print(f"[CACHE CLEARED] {pair}: removed {removed_count} cache entries (RESET)")
+            self._save_cache()
+    
+    def _mark_as_sent(self, pair: str, level: int, message_text: str = None):
+        """Отметить сигнал как отправленный
+        
+        Args:
+            pair: Название пары
+            level: Уровень сигнала
+            message_text: Текст сообщения (для блокировки одинаковых сообщений навсегда)
+        """
         current_time = time.time()
-        expired_keys = [k for k, v in self.sent_signals_cache.items() if current_time - v > 3600]
+        
+        # Сохраняем по ключу (pair, level) - временная защита (10 минут)
+        key = (pair, level)
+        self.sent_signals_cache[key] = current_time
+        
+        # Сохраняем по тексту сообщения - БЛОКИРОВКА НАВСЕГДА
+        if message_text:
+            message_key = f"msg:{message_text}"
+            # Используем специальное значение для "навсегда" (очень большое число)
+            self.sent_signals_cache[message_key] = float('inf')  # Навсегда
+            # НЕМЕДЛЕННО сохраняем в файл
+            self._save_cache()
+        
+        # Очистка старых записей по (pair, level) (старше 1 часа) - только для временных записей
+        expired_keys = [k for k, v in self.sent_signals_cache.items() 
+                       if not k.startswith("msg:") and current_time - v > 3600]
         for k in expired_keys:
             del self.sent_signals_cache[k]
+        
+        # Ограничиваем размер кэша сообщений (максимум 5000 записей)
+        # Удаляем самые старые записи по сообщениям (но не те, что помечены как "навсегда")
+        message_keys = [k for k in self.sent_signals_cache.keys() if k.startswith("msg:")]
+        if len(message_keys) > 5000:
+            # Удаляем только те, что не помечены как "навсегда"
+            regular_message_keys = [k for k in message_keys if self.sent_signals_cache[k] != float('inf')]
+            if len(regular_message_keys) > 0:
+                sorted_items = sorted([(k, self.sent_signals_cache[k]) for k in regular_message_keys], 
+                                     key=lambda x: x[1])
+                for k, _ in sorted_items[:len(regular_message_keys) - 4500]:  # Оставляем 4500 + 500 "навсегда"
+                    del self.sent_signals_cache[k]
     
     def send_signals_batch(self, signals: list):
         """Отправить список сигналов - каждый отдельным сообщением с инлайн кнопкой"""
@@ -74,8 +218,8 @@ class TelegramSender:
                 
                 print(f"[TELEGRAM] Processing signal: {pair}, level={level}, drop={drop:.2f}%, price={current_price}")
                 
-                # ПРОВЕРКА ДУБЛИКАТА (последняя линия защиты)
-                if self._is_duplicate(pair, level):
+                # ПРОВЕРКА ДУБЛИКАТА (последняя линия защиты) - проверяем по ключу И по тексту сообщения
+                if self._is_duplicate(pair, level, drop, current_price):
                     print(f"[TELEGRAM BLOCKED] {pair} Level {level}: blocked by _is_duplicate() cache")
                     blocked_count += 1
                     continue
@@ -83,7 +227,8 @@ class TelegramSender:
                 print(f"[TELEGRAM] {pair} Level {level}: passed duplicate check, sending...")
                 
                 # Проверяем что цена передана
-                if current_price is None or current_price <= 0:
+                # Проверяем на None, <= 0, или очень маленькое значение (близко к 0)
+                if current_price is None or current_price <= 0 or current_price < 0.0001:
                     print(f"[WARNING] {pair}: current_price not provided or invalid ({current_price}), skipping price in message")
                     price_str = "N/A"
                 else:
@@ -138,7 +283,8 @@ class TelegramSender:
                 response.raise_for_status()
                 
                 # ОТМЕЧАЕМ КАК ОТПРАВЛЕННЫЙ (для защиты от дублей)
-                self._mark_as_sent(pair, level)
+                # Сохраняем и по ключу (pair, level), и по тексту сообщения (НАВСЕГДА)
+                self._mark_as_sent(pair, level, message)
                 
                 sent_count += 1
                 message_id = result.get("result", {}).get("message_id", "N/A")

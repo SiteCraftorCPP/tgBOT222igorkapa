@@ -267,11 +267,15 @@ class CryptoSignalBot:
         # Проверка возраста локального максимума (4 часа)
         if self.state_manager.check_local_max_age(pair, current_time):
             self.state_manager.reset_state(pair, current_price)
+            # Очищаем кэш сообщений для этой пары при RESET
+            self.telegram.clear_cache_for_pair(pair)
             return None
         
         # Проверка условий для RESET
         if self.state_manager.should_reset(pair, current_price, current_time):
             self.state_manager.reset_state(pair, current_price)
+            # Очищаем кэш сообщений для этой пары при RESET
+            self.telegram.clear_cache_for_pair(pair)
             return None
         
         # Обновление локального максимума (если цена выше более чем на 0.01%)
@@ -304,6 +308,9 @@ class CryptoSignalBot:
             )
         
         # Проверка уровней падения (получаем актуальное состояние)
+        # КРИТИЧЕСКИ ВАЖНО: Перезагружаем состояние из файла перед проверкой уровней
+        # Это гарантирует, что triggered_levels синхронизирован с файлом
+        self.state_manager.load_states(silent=True)
         current_state = self.state_manager.get_state(pair)
         
         # Вычисляем падение для логирования
@@ -313,11 +320,13 @@ class CryptoSignalBot:
         if drop_percent <= -3.0:
             print(f"[DROP] {pair}: {drop_percent:.2f}% | price={current_price:.4f}, max={current_state['local_max']:.4f}, triggered={current_state['triggered_levels']}")
         
+        triggered_levels = current_state.get("triggered_levels", [])
+        
         signal = self.market_monitor.check_levels(
             pair,
             current_price,
             current_state["local_max"],
-            current_state["triggered_levels"]  # Используем актуальный список
+            triggered_levels  # Используем актуальный список
         )
         
         # Подсчёт мониторинга (пара инициализирована и активно мониторится, нет сигналов)
@@ -333,17 +342,28 @@ class CryptoSignalBot:
             drop = signal["drop_percent"]
             
             # КРИТИЧЕСКИ ВАЖНО: Проверяем ЕЩЁ РАЗ, что уровень не сработал (финальная проверка)
+            # Перезагружаем состояние ЕЩЁ РАЗ перед финальной проверкой
+            self.state_manager.load_states(silent=True)
             final_check = self.state_manager.get_state(pair)
             triggered_in_check = final_check.get("triggered_levels", [])
+            
             if level in triggered_in_check:
-                print(f"[SKIP RACE] {pair}: Level {level} already in triggered_levels: {triggered_in_check}")
+                print(f"[SKIP DUPLICATE] {pair}: Level {level} already in triggered_levels: {triggered_in_check} | drop={drop:.2f}%")
                 return None
             
             # УБИРАЕМ ВРЕМЕННОЕ ОКНО: сохраняем уровень СРАЗУ после создания сигнала, ДО возврата
             # Это гарантирует, что следующий цикл уже увидит уровень в triggered_levels
             # Нет race condition между созданием и сохранением!
             self.state_manager.add_triggered_level(pair, level, current_time)
-            print(f"[SIGNAL CREATED] {pair}: Level {level} | {drop:.2f}% | Price: {current_price:.4f} | triggered_levels saved IMMEDIATELY")
+            
+            # ФИНАЛЬНАЯ ПРОВЕРКА: убеждаемся, что уровень действительно сохранён
+            verify_state = self.state_manager.get_state(pair)
+            if level not in verify_state.get("triggered_levels", []):
+                print(f"[ERROR] {pair}: Level {level} NOT saved to triggered_levels! State: {verify_state.get('triggered_levels', [])}")
+                # Пытаемся сохранить ещё раз
+                self.state_manager.add_triggered_level(pair, level, current_time)
+            
+            print(f"[SIGNAL CREATED] {pair}: Level {level} | {drop:.2f}% | Price: {current_price:.4f} | triggered_levels={verify_state.get('triggered_levels', [])}")
             
             # Возвращаем сигнал для отправки батчем
             return {

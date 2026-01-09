@@ -232,16 +232,23 @@ class MarketMonitor:
         
         drop_percent = ((current_price - local_max) / local_max) * 100
         
+        # Логируем проверку уровней для отладки дублей
+        if drop_percent <= -8.0:  # Только для значительных падений
+            print(f"[CHECK LEVELS] {pair}: drop={drop_percent:.2f}%, triggered_levels={triggered_levels}, max={local_max:.4f}, price={current_price:.4f}")
+        
         for level_info in LEVELS:
             level = level_info["level"]
             threshold = level_info["drop"]
             
             # Если уровень уже сработал, пропускаем
             if level in triggered_levels:
+                if drop_percent <= threshold:  # Логируем только если падение достигло этого уровня
+                    print(f"[CHECK LEVELS] {pair}: Level {level} ({threshold}%) already triggered, skipping (drop={drop_percent:.2f}%)")
                 continue
             
             # Если падение достигло этого уровня - возвращаем сигнал
             if drop_percent <= threshold:
+                print(f"[CHECK LEVELS] {pair}: Level {level} ({threshold}%) TRIGGERED! drop={drop_percent:.2f}%, triggered_levels={triggered_levels}")
                 return {
                     "level": level,
                     "drop_percent": drop_percent,
