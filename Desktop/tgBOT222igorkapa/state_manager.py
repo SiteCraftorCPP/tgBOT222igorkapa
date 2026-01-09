@@ -156,6 +156,32 @@ class StateManager:
         
         return False
     
+    def is_duplicate_signal(self, pair: str, level: int, current_time: float) -> bool:
+        """Проверить, не является ли сигнал дубликатом
+        
+        Блокирует если:
+        1. Уровень уже в triggered_levels
+        2. Тот же уровень отправлялся менее 10 минут назад
+        """
+        state = self.get_state(pair)
+        
+        # Проверка 1: уровень уже сработал
+        if level in state.get("triggered_levels", []):
+            print(f"[DUPLICATE CHECK] {pair}: Level {level} already in triggered_levels")
+            return True
+        
+        # Проверка 2: тот же уровень отправлялся недавно (защита от race condition)
+        last_level = state.get("last_signal_level")
+        last_time = state.get("last_signal_time")
+        
+        if last_level == level and last_time is not None:
+            elapsed = current_time - last_time
+            if elapsed < 600:  # 10 минут
+                print(f"[DUPLICATE CHECK] {pair}: Level {level} was sent {elapsed:.0f}s ago (< 600s)")
+                return True
+        
+        return False
+    
     def add_triggered_level(self, pair: str, level: int, current_time: float):
         """Добавить сработавший уровень"""
         state = self.get_state(pair)
@@ -163,4 +189,6 @@ class StateManager:
             state["triggered_levels"].append(level)
             state["last_signal_time"] = current_time
             state["last_signal_level"] = level  # Сохраняем последний отправленный уровень
+            # НЕМЕДЛЕННО сохраняем в файл
             self.save_states()
+            print(f"[STATE SAVED] {pair}: Level {level} saved to triggered_levels, file updated")
