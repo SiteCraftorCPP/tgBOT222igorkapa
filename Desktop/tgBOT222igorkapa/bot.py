@@ -220,7 +220,7 @@ class CryptoSignalBot:
                     for sig in cycle_signals:
                         print(f"  - {sig['pair']}: Level {sig['level']}, drop {sig['drop_percent']:.2f}%, price {sig.get('current_price', 'N/A')}")
                     
-                    result = self.telegram.send_signals_batch(cycle_signals)
+                    result = self.telegram.send_signals_batch(cycle_signals, self.market_monitor)
                     if result:
                         print(f"[SIGNALS SENT] ✅ Successfully sent {len(cycle_signals)} signals")
                     else:
@@ -362,6 +362,21 @@ class CryptoSignalBot:
                 print(f"[ERROR] {pair}: Level {level} NOT saved to triggered_levels! State: {verify_state.get('triggered_levels', [])}")
                 # Пытаемся сохранить ещё раз
                 self.state_manager.add_triggered_level(pair, level, current_time)
+            
+            # КРИТИЧЕСКИ ВАЖНО: Проверяем, что цена валидна перед отправкой
+            if current_price is None or current_price <= 0:
+                print(f"[ERROR] {pair}: Invalid price ({current_price}) when creating signal! Getting fresh price from cache...")
+                # Пытаемся получить актуальную цену из кэша
+                fresh_price = self.market_monitor.get_current_price(pair)
+                if fresh_price is not None and fresh_price > 0:
+                    current_price = fresh_price
+                    print(f"[FIXED] {pair}: Updated price to {current_price:.4f}")
+                else:
+                    print(f"[ERROR] {pair}: Still invalid price ({fresh_price}), using fallback")
+                    # Используем local_max как fallback
+                    if current_state.get("local_max") and current_state["local_max"] > 0:
+                        current_price = current_state["local_max"]
+                        print(f"[FALLBACK] {pair}: Using local_max as price: {current_price:.4f}")
             
             print(f"[SIGNAL CREATED] {pair}: Level {level} | {drop:.2f}% | Price: {current_price:.4f} | triggered_levels={verify_state.get('triggered_levels', [])}")
             

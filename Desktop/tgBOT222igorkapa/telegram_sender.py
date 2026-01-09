@@ -199,8 +199,13 @@ class TelegramSender:
                 for k, _ in sorted_items[:len(regular_message_keys) - 4500]:  # Оставляем 4500 + 500 "навсегда"
                     del self.sent_signals_cache[k]
     
-    def send_signals_batch(self, signals: list):
-        """Отправить список сигналов - каждый отдельным сообщением с инлайн кнопкой"""
+    def send_signals_batch(self, signals: list, market_monitor=None):
+        """Отправить список сигналов - каждый отдельным сообщением с инлайн кнопкой
+        
+        Args:
+            signals: Список сигналов для отправки
+            market_monitor: Опционально, объект MarketMonitor для получения актуальной цены
+        """
         if not signals:
             return
         
@@ -215,6 +220,14 @@ class TelegramSender:
                 level = signal.get("level", 0)
                 drop = signal["drop_percent"]
                 current_price = signal.get("current_price")
+                
+                # КРИТИЧЕСКИ ВАЖНО: Получаем АКТУАЛЬНУЮ цену из кэша перед отправкой!
+                # Цена могла измениться между созданием сигнала и отправкой
+                if market_monitor is not None:
+                    actual_price = market_monitor.get_current_price(pair)
+                    if actual_price is not None and actual_price > 0:
+                        current_price = actual_price
+                        print(f"[TELEGRAM] {pair}: Updated price from {signal.get('current_price', 'N/A')} to {actual_price:.4f}")
                 
                 print(f"[TELEGRAM] Processing signal: {pair}, level={level}, drop={drop:.2f}%, price={current_price}")
                 
