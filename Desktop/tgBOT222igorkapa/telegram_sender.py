@@ -24,14 +24,23 @@ class TelegramSender:
         key = (pair, level)
         current_time = time.time()
         
+        print(f"[DUPLICATE CHECK] {pair} Level {level}: checking cache (size={len(self.sent_signals_cache)})")
+        print(f"[DUPLICATE CHECK] Cache keys: {list(self.sent_signals_cache.keys())}")
+        
         if key in self.sent_signals_cache:
             last_sent = self.sent_signals_cache[key]
             elapsed = current_time - last_sent
             
+            print(f"[DUPLICATE CHECK] Found in cache: last_sent={last_sent}, elapsed={elapsed:.1f}s, block_time={self.DUPLICATE_BLOCK_TIME}s")
+            
             if elapsed < self.DUPLICATE_BLOCK_TIME:
                 minutes = elapsed / 60
-                print(f"[DUPLICATE BLOCKED] {pair} Level {level}: уже отправлен {minutes:.1f} мин назад (блок на {self.DUPLICATE_BLOCK_TIME/60:.0f} мин)")
+                print(f"[DUPLICATE BLOCKED] ❌ {pair} Level {level}: уже отправлен {minutes:.1f} мин назад (блок на {self.DUPLICATE_BLOCK_TIME/60:.0f} мин)")
                 return True
+            else:
+                print(f"[DUPLICATE CHECK] ✅ {pair} Level {level}: elapsed ({elapsed:.1f}s) >= block_time ({self.DUPLICATE_BLOCK_TIME}s), NOT a duplicate")
+        else:
+            print(f"[DUPLICATE CHECK] ✅ {pair} Level {level}: NOT in cache, NOT a duplicate")
         
         return False
     
@@ -63,10 +72,15 @@ class TelegramSender:
                 drop = signal["drop_percent"]
                 current_price = signal.get("current_price")
                 
+                print(f"[TELEGRAM] Processing signal: {pair}, level={level}, drop={drop:.2f}%, price={current_price}")
+                
                 # ПРОВЕРКА ДУБЛИКАТА (последняя линия защиты)
                 if self._is_duplicate(pair, level):
+                    print(f"[TELEGRAM BLOCKED] {pair} Level {level}: blocked by _is_duplicate() cache")
                     blocked_count += 1
                     continue
+                
+                print(f"[TELEGRAM] {pair} Level {level}: passed duplicate check, sending...")
                 
                 # Проверяем что цена передана
                 if current_price is None or current_price <= 0:
@@ -101,22 +115,41 @@ class TelegramSender:
                     }
                 }
                 
+                print(f"[TELEGRAM] Sending to {self.chat_id}: {message}")
                 response = requests.post(
                     f"{self.base_url}/sendMessage",
                     json=payload,
                     timeout=3
                 )
+                
+                print(f"[TELEGRAM] Response status: {response.status_code}")
+                
+                if response.status_code != 200:
+                    error_text = response.text
+                    print(f"[TELEGRAM ERROR] HTTP {response.status_code}: {error_text}")
+                    raise Exception(f"HTTP {response.status_code}: {error_text}")
+                
+                result = response.json()
+                if not result.get("ok"):
+                    error_desc = result.get("description", "Unknown error")
+                    print(f"[TELEGRAM ERROR] API returned error: {error_desc}")
+                    raise Exception(f"API error: {error_desc}")
+                
                 response.raise_for_status()
                 
                 # ОТМЕЧАЕМ КАК ОТПРАВЛЕННЫЙ (для защиты от дублей)
                 self._mark_as_sent(pair, level)
                 
                 sent_count += 1
-                print(f"[SIGNAL SENT] {formatted_pair}: {message}")
+                message_id = result.get("result", {}).get("message_id", "N/A")
+                print(f"[SIGNAL SENT] ✅ {formatted_pair}: {message} | Message ID: {message_id}")
                 
             except Exception as e:
                 failed_count += 1
-                print(f"[ERROR] Failed to send signal for {pair}: {e}")
+                print(f"[ERROR] ❌ Failed to send signal for {pair} Level {level}: {e}")
+                import traceback
+                print(f"[ERROR] Traceback:")
+                traceback.print_exc()
         
         if sent_count > 0 or blocked_count > 0:
             print(f"[BATCH COMPLETE] Sent {sent_count}/{len(signals)} signals (failed: {failed_count}, blocked duplicates: {blocked_count})")

@@ -212,38 +212,21 @@ class CryptoSignalBot:
                         change_str = f"{price_change:+.2f}%" if last_price and last_price > 0 else "N/A"
                         print(f"  {idx}. {pair}: {drop:.2f}% drop | price={price:.4f} (was {last_str} {change_str}) | max={max_price:.4f} | levels={levels_str}")
                 
-                # ФИНАЛЬНАЯ ПРОВЕРКА ПЕРЕД ОТПРАВКОЙ (подстраховка)
-                # Уровни уже сохранены в check_pair(), но проверяем ещё раз для надёжности
-                final_signals = []
-                for signal in cycle_signals:
-                    pair = signal["pair"]
-                    level = signal["level"]
+                # Отправляем сигналы (уровни уже сохранены в check_pair() СРАЗУ после создания)
+                # НЕ проверяем is_duplicate_signal() здесь, т.к. это уже сделано в check_pair() ДО сохранения уровня!
+                # Если бы проверять здесь - сигнал будет заблокирован, т.к. уровень уже в triggered_levels
+                if cycle_signals:
+                    print(f"\n[SENDING] Preparing to send {len(cycle_signals)} signals (levels already saved in check_pair)")
+                    for sig in cycle_signals:
+                        print(f"  - {sig['pair']}: Level {sig['level']}, drop {sig['drop_percent']:.2f}%, price {sig.get('current_price', 'N/A')}")
                     
-                    # Проверка на дубликат (комплексная: triggered_levels + last_signal_level + время)
-                    # Уровень уже сохранён в check_pair(), но проверяем для подстраховки
-                    if self.state_manager.is_duplicate_signal(pair, level, current_time):
-                        print(f"[SKIP DUPLICATE] {pair}: Level {level} blocked by is_duplicate_signal() (should not happen)")
-                        continue
-                    
-                    # Добавляем сигнал (уровень уже сохранён, нет временного окна)
-                    final_signals.append(signal)
-                
-                # Отправляем только проверенные сигналы
-                if final_signals:
-                    # Уровни уже сохранены в check_pair() СРАЗУ после создания сигнала
-                    # Нет временного окна между созданием и сохранением!
-                    print(f"[SENDING] Preparing to send {len(final_signals)}/{len(cycle_signals)} signals (levels already saved)")
-                    self.telegram.send_signals_batch(final_signals)
-                    print(f"[SIGNALS SENT] Sent {len(final_signals)} signals successfully")
-                elif cycle_signals:
-                    print(f"[WARNING] All {len(cycle_signals)} signals were filtered as duplicates, nothing sent")
-                    # Диагностика: почему все сигналы были отфильтрованы?
-                    for signal in cycle_signals:
-                        pair = signal["pair"]
-                        level = signal["level"]
-                        fresh_state = self.state_manager.get_state(pair)
-                        triggered = fresh_state.get("triggered_levels", [])
-                        print(f"[DEBUG] {pair} Level {level}: filtered because in triggered_levels: {triggered}")
+                    result = self.telegram.send_signals_batch(cycle_signals)
+                    if result:
+                        print(f"[SIGNALS SENT] ✅ Successfully sent {len(cycle_signals)} signals")
+                    else:
+                        print(f"[SIGNALS SENT] ❌ Failed to send signals (result={result})")
+                else:
+                    print(f"[SENDING] No signals to send (cycle_signals is empty)")
                 
                 print(f"\n[OK] Cycle complete. Waiting {CHECK_INTERVAL} sec...")
                 time.sleep(CHECK_INTERVAL)
