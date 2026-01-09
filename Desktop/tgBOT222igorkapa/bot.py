@@ -269,7 +269,7 @@ class CryptoSignalBot:
             self.state_manager.reset_state(pair, current_price)
             # Очищаем кэш сообщений для этой пары при RESET
             self.telegram.clear_cache_for_pair(pair)
-            return None
+                return None
         
         # Проверка условий для RESET
         if self.state_manager.should_reset(pair, current_price, current_time):
@@ -279,13 +279,17 @@ class CryptoSignalBot:
             return None
         
         # Обновление локального максимума (если цена выше более чем на 0.01%)
+        # КРИТИЧЕСКИ ВАЖНО: НЕ обновляем local_max, если уже есть сработавшие уровни!
+        # Это предотвращает пересчёт процента падения относительно нового максимума
+        # и повторное срабатывание уже триггернутых уровней
         # ВАЖНО: Обновление максимума НЕ вызывает RESET!
         # RESET происходит ТОЛЬКО через should_reset():
         #   - Рост от минимума на нужный % (зависит от уровня)
         #   - ИЛИ через 2 часа после последнего сигнала
+        triggered_levels = state.get("triggered_levels", [])
         price_increase = ((current_price - state["local_max"]) / state["local_max"]) * 100 if state["local_max"] > 0 else 0
-        if price_increase > 0.01:  # Рост больше 0.01% - обновляем максимум
-            print(f"[MAX UPDATE] {pair}: {state['local_max']:.4f} -> {current_price:.4f} (+{price_increase:.2f}%) | triggered_levels сохранены: {state.get('triggered_levels', [])}")
+        if price_increase > 0.01 and not triggered_levels:  # Рост больше 0.01% И нет сработавших уровней - обновляем максимум
+            print(f"[MAX UPDATE] {pair}: {state['local_max']:.4f} -> {current_price:.4f} (+{price_increase:.2f}%) | triggered_levels={triggered_levels}")
             self.state_manager.update_state(
                 pair,
                 local_max=current_price,
@@ -298,6 +302,9 @@ class CryptoSignalBot:
                 stats["max_updated"] += 1
             # НЕ return None - продолжаем проверку уровней, так как RESET не произошёл
             # (хотя сейчас уровни не должны сработать, так как цена выше максимума)
+        elif price_increase > 0.01 and triggered_levels:
+            # Цена выросла, но есть сработавшие уровни - НЕ обновляем максимум!
+            print(f"[MAX UPDATE BLOCKED] {pair}: price={current_price:.4f} (+{price_increase:.2f}%) > max={state['local_max']:.4f}, but triggered_levels={triggered_levels} - NOT updating max to prevent level re-triggering")
         
         # Обновление локального минимума (если цена ниже)
         if state["local_min"] is None or current_price < state["local_min"]:
@@ -361,7 +368,7 @@ class CryptoSignalBot:
             if level not in verify_state.get("triggered_levels", []):
                 print(f"[ERROR] {pair}: Level {level} NOT saved to triggered_levels! State: {verify_state.get('triggered_levels', [])}")
                 # Пытаемся сохранить ещё раз
-                self.state_manager.add_triggered_level(pair, level, current_time)
+            self.state_manager.add_triggered_level(pair, level, current_time)
             
             # КРИТИЧЕСКИ ВАЖНО: Проверяем, что цена валидна перед отправкой
             if current_price is None or current_price <= 0:
