@@ -39,11 +39,11 @@ RESET_GROWTH_PERCENT = 2.0
 # ============================================
 
 LEVELS = [
-    {"level": 1, "drop": -4.0, "time_limit": 120 * 60},  # 120 минут для Level 1
-    {"level": 2, "drop": -7.0, "time_limit": 180 * 60},  # 180 минут для Level 2
-    {"level": 3, "drop": -11.0, "time_limit": None},     # Без ограничений
-    {"level": 4, "drop": -16.0, "time_limit": None},     # Без ограничений
-    {"level": 5, "drop": -22.0, "time_limit": None}      # Без ограничений
+    {"level": 1, "drop": -3.0},  # ТЕСТОВО: изменено на -3.0
+    {"level": 2, "drop": -12.0},
+    {"level": 3, "drop": -16.0},
+    {"level": 4, "drop": -20.0},
+    {"level": 5, "drop": -24.0}
 ]
 
 # ============================================
