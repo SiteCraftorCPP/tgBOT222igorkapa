@@ -214,7 +214,7 @@ class TelegramSender:
         blocked_count = 0
         
         # Отправляем каждый сигнал отдельным сообщением
-            for signal in signals:
+        for signal in signals:
             try:
                 pair = signal["pair"]
                 level = signal.get("level", 0)
@@ -258,11 +258,11 @@ class TelegramSender:
                 
                 # Создаём инлайн кнопку для этого сигнала
                 buy_url = "https://now.bit2me.com/tradingmegabot"
-            
-            payload = {
-                "chat_id": self.chat_id,
-                "text": message,
-                "parse_mode": "Markdown",
+                
+                payload = {
+                    "chat_id": self.chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown",
                     "disable_web_page_preview": True,
                     "reply_markup": {
                         "inline_keyboard": [[{
@@ -273,11 +273,11 @@ class TelegramSender:
                 }
                 
                 print(f"[TELEGRAM] Sending to {self.chat_id}: {message}")
-            response = requests.post(
-                f"{self.base_url}/sendMessage",
-                json=payload,
+                response = requests.post(
+                    f"{self.base_url}/sendMessage",
+                    json=payload,
                     timeout=3
-            )
+                )
                 
                 print(f"[TELEGRAM] Response status: {response.status_code}")
                 
@@ -292,8 +292,8 @@ class TelegramSender:
                     print(f"[TELEGRAM ERROR] API returned error: {error_desc}")
                     raise Exception(f"API error: {error_desc}")
                 
-            response.raise_for_status()
-            
+                response.raise_for_status()
+                
                 # ОТМЕЧАЕМ КАК ОТПРАВЛЕННЫЙ (для защиты от дублей)
                 # Сохраняем и по ключу (pair, level), и по тексту сообщения (НАВСЕГДА)
                 self._mark_as_sent(pair, level, message)
@@ -302,7 +302,7 @@ class TelegramSender:
                 message_id = result.get("result", {}).get("message_id", "N/A")
                 print(f"[SIGNAL SENT] ✅ {formatted_pair}: {message} | Message ID: {message_id}")
                 
-        except Exception as e:
+            except Exception as e:
                 failed_count += 1
                 print(f"[ERROR] ❌ Failed to send signal for {pair} Level {level}: {e}")
                 import traceback
