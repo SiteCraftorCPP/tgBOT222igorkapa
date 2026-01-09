@@ -82,11 +82,16 @@ def test_signals_with_duplicate_protection():
         if signal1:
             print(f"✅ Сигнал Level {signal1['level']} создан (падение: {signal1['drop_percent']:.2f}%)")
             
-            # Финальная проверка перед отправкой (как в bot.py)
+            # НОВАЯ ЛОГИКА: Сохраняем уровень СРАЗУ после создания сигнала, ДО отправки
+            # (как в обновлённом bot.py)
             final_check = state_manager.get_state(test_pair)
             if signal1['level'] in final_check.get("triggered_levels", []):
                 print(f"❌ Level {signal1['level']} уже в triggered_levels - не отправляем")
                 return False
+            
+            # УБИРАЕМ ВРЕМЕННОЕ ОКНО: сохраняем уровень СРАЗУ
+            state_manager.add_triggered_level(test_pair, signal1['level'], current_time)
+            print(f"✅ Level {signal1['level']} сохранён в triggered_levels СРАЗУ (до отправки)")
             
             # Отправляем сигнал в Telegram
             signals_to_send = [{
@@ -101,9 +106,7 @@ def test_signals_with_duplicate_protection():
             
             if send_result:
                 print(f"✅ Сигнал Level {signal1['level']} отправлен в канал!")
-                # Сохраняем уровень после отправки
-                state_manager.add_triggered_level(test_pair, signal1['level'], current_time)
-                print(f"   Level {signal1['level']} добавлен в triggered_levels")
+                # Уровень уже сохранён выше, не нужно сохранять снова
             else:
                 print(f"❌ Ошибка отправки сигнала")
                 return False
@@ -111,20 +114,21 @@ def test_signals_with_duplicate_protection():
             print(f"❌ Сигнал не создан")
             return False
         
-        # ===== ЦИКЛ 2: Попытка отправить тот же Level 1 (дубль) =====
+        # ===== ЦИКЛ 2: Проверка что временное окно устранено =====
         print("\n" + "="*60)
-        print("ЦИКЛ 2: Попытка отправить Level 1 повторно (ДУБЛЬ)")
+        print("ЦИКЛ 2: Проверка устранения временного окна")
         print("="*60)
         
-        time.sleep(2)  # Небольшая задержка между циклами
+        # СРАЗУ проверяем (без задержки) - уровень должен быть уже сохранён
+        # В старой версии здесь могло быть временное окно
         current_time_cycle2 = time.time()
-        
         state_cycle2 = state_manager.get_state(test_pair)
         triggered_levels_cycle2 = state_cycle2.get("triggered_levels", [])
         
         print(f"triggered_levels = {triggered_levels_cycle2}")
+        print(f"✅ Проверяем СРАЗУ после сохранения (временное окно должно быть устранено)")
         
-        # Проверяем, создастся ли сигнал
+        # Проверяем, создастся ли сигнал (НЕ должен)
         signal2 = market_monitor.check_levels(
             test_pair,
             price_level1,  # Та же цена
@@ -134,11 +138,32 @@ def test_signals_with_duplicate_protection():
         
         if signal2:
             print(f"❌ ОШИБКА! Сигнал Level {signal2['level']} создан повторно!")
-            print(f"   Защита от дублей НЕ РАБОТАЕТ!")
+            print(f"   ВРЕМЕННОЕ ОКНО НЕ УСТРАНЕНО!")
+            print(f"   Уровень был сохранён, но следующий цикл всё равно создал сигнал")
             return False
         else:
-            print(f"✅ Сигнал НЕ создан - защита от дублей работает!")
+            print(f"✅ Сигнал НЕ создан - временное окно УСТРАНЕНО!")
             print(f"   Level 1 уже в triggered_levels, повторный сигнал заблокирован")
+        
+        # Проверяем также через небольшую задержку (имитация реального цикла)
+        print(f"\n   Проверка через 0.5 сек (имитация следующего цикла)...")
+        time.sleep(0.5)
+        
+        state_cycle2_delayed = state_manager.get_state(test_pair)
+        triggered_levels_cycle2_delayed = state_cycle2_delayed.get("triggered_levels", [])
+        
+        signal2_delayed = market_monitor.check_levels(
+            test_pair,
+            price_level1,
+            test_local_max,
+            triggered_levels_cycle2_delayed
+        )
+        
+        if signal2_delayed:
+            print(f"❌ ОШИБКА! Сигнал создан даже после задержки!")
+            return False
+        else:
+            print(f"✅ Сигнал НЕ создан и после задержки - всё работает!")
         
         # ===== ЦИКЛ 3: Отправка Level 2 (новый уровень) =====
         print("\n" + "="*60)
@@ -165,11 +190,15 @@ def test_signals_with_duplicate_protection():
         if signal3:
             print(f"✅ Сигнал Level {signal3['level']} создан (падение: {signal3['drop_percent']:.2f}%)")
             
-            # Финальная проверка
+            # НОВАЯ ЛОГИКА: Сохраняем уровень СРАЗУ
             final_check3 = state_manager.get_state(test_pair)
             if signal3['level'] in final_check3.get("triggered_levels", []):
                 print(f"❌ Level {signal3['level']} уже в triggered_levels - не отправляем")
                 return False
+            
+            # Сохраняем СРАЗУ (устраняем временное окно)
+            state_manager.add_triggered_level(test_pair, signal3['level'], current_time_cycle3)
+            print(f"✅ Level {signal3['level']} сохранён в triggered_levels СРАЗУ (до отправки)")
             
             # Отправляем в Telegram
             signals_to_send3 = [{
@@ -184,8 +213,7 @@ def test_signals_with_duplicate_protection():
             
             if send_result3:
                 print(f"✅ Сигнал Level {signal3['level']} отправлен в канал!")
-                state_manager.add_triggered_level(test_pair, signal3['level'], current_time_cycle3)
-                print(f"   Level {signal3['level']} добавлен в triggered_levels")
+                # Уровень уже сохранён выше
             else:
                 print(f"❌ Ошибка отправки сигнала")
                 return False
@@ -261,14 +289,17 @@ def test_signals_with_duplicate_protection():
         # Поэтому проверим, что Level 3 сработал
         
         if signals_batch:
+            # НОВАЯ ЛОГИКА: Сохраняем уровни СРАЗУ после создания сигналов, ДО отправки
+            for sig in signals_batch:
+                state_manager.add_triggered_level(test_pair, sig['level'], current_time_cycle5)
+                print(f"✅ Level {sig['level']} сохранён в triggered_levels СРАЗУ (до отправки)")
+            
             print(f"\nОтправка {len(signals_batch)} сигнала(ов) в Telegram канал...")
             send_result5 = telegram_sender.send_signals_batch(signals_batch)
             
             if send_result5:
                 print(f"✅ Сигнал(ы) отправлены в канал!")
-                for sig in signals_batch:
-                    state_manager.add_triggered_level(test_pair, sig['level'], current_time_cycle5)
-                    print(f"   Level {sig['level']} добавлен в triggered_levels")
+                # Уровни уже сохранены выше
             else:
                 print(f"❌ Ошибка отправки")
                 return False

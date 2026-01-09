@@ -145,22 +145,28 @@ class StateManager:
         
         return False
     
-    def get_reset_percent_for_level(self, max_level: int) -> float:
-        """Получить процент отскока для RESET в зависимости от максимального достигнутого уровня"""
-        # Чем глубже падение, тем больший отскок нужен:
-        # Level 1 (-8%): RESET на +3%
-        # Level 2 (-12%): RESET на +4%
-        # Level 3 (-16%): RESET на +5%
-        # Level 4 (-20%): RESET на +6%
-        # Level 5 (-24%): RESET на +7%
-        reset_map = {
-            1: 3.0,
-            2: 4.0,
-            3: 5.0,
-            4: 6.0,
-            5: 7.0
-        }
-        return reset_map.get(max_level, 3.0)  # По умолчанию 3% если уровни не сработали
+    def get_reset_percent_for_drop(self, max_drop_percent: float) -> float:
+        """Получить процент отскока для RESET в зависимости от максимального падения
+        
+        Правила RESET:
+        - если падение было −5% → RESET при росте +2%
+        - если падение было −9% → RESET при росте +3%
+        - если падение было −13% → RESET при росте +4%
+        - если падение было −17% → RESET при росте +5%
+        - если падение было −21% → RESET при росте +6%
+        """
+        if max_drop_percent >= -5.0:
+            return 2.0  # Падение от 0% до -5% → RESET при +2%
+        elif max_drop_percent >= -9.0:
+            return 3.0  # Падение от -5% до -9% → RESET при +3%
+        elif max_drop_percent >= -13.0:
+            return 4.0  # Падение от -9% до -13% → RESET при +4%
+        elif max_drop_percent >= -17.0:
+            return 5.0  # Падение от -13% до -17% → RESET при +5%
+        elif max_drop_percent >= -21.0:
+            return 6.0  # Падение от -17% до -21% → RESET при +6%
+        else:
+            return 7.0  # Падение глубже -21% → RESET при +7%
     
     def should_reset(self, pair: str, current_price: float, current_time: float) -> bool:
         """Проверка условий для сброса состояния"""
@@ -174,22 +180,20 @@ class StateManager:
                 return True
         
         # Условие 2: цена выросла на нужный процент от локального минимума
-        # Процент зависит от максимального достигнутого уровня падения
-        if state["local_min"] is not None and state["local_min"] > 0:
-            triggered_levels = state.get("triggered_levels", [])
+        # Процент зависит от максимального падения (не уровня, а процента!)
+        if state["local_min"] is not None and state["local_min"] > 0 and state["local_max"] is not None and state["local_max"] > 0:
+            # Считаем максимальное падение от максимума до минимума
+            max_drop_percent = ((state["local_min"] - state["local_max"]) / state["local_max"]) * 100
             
-            # Определяем максимальный достигнутый уровень (самый глубокий уровень падения)
-            max_triggered_level = max(triggered_levels) if triggered_levels else 0
-            
-            # Получаем нужный процент отскока для RESET
-            required_growth_percent = self.get_reset_percent_for_level(max_triggered_level)
+            # Получаем нужный процент отскока для RESET в зависимости от максимального падения
+            required_growth_percent = self.get_reset_percent_for_drop(max_drop_percent)
             
             # Считаем фактический рост от минимума
             growth = ((current_price - state["local_min"]) / state["local_min"]) * 100
             
             if growth >= required_growth_percent:
-                level_info = f" (max level={max_triggered_level}, required={required_growth_percent}%)" if max_triggered_level > 0 else ""
-                print(f"[RESET] {pair}: +{growth:.2f}% growth from min{level_info}")
+                drop_info = f" (max drop={max_drop_percent:.2f}%, required={required_growth_percent}%)"
+                print(f"[RESET] {pair}: +{growth:.2f}% growth from min{drop_info}")
                 return True
         
         return False

@@ -292,23 +292,25 @@ class CryptoSignalBot:
             return None
         
         # Обновление локального максимума (если цена выше более чем на 0.01%)
-        # Используем относительное сравнение, чтобы учесть погрешности float
+        # ВАЖНО: Обновление максимума НЕ вызывает RESET!
+        # RESET происходит ТОЛЬКО через should_reset():
+        #   - Рост от минимума на нужный % (зависит от уровня)
+        #   - ИЛИ через 2 часа после последнего сигнала
         price_increase = ((current_price - state["local_max"]) / state["local_max"]) * 100 if state["local_max"] > 0 else 0
-        if price_increase > 0.01:  # Рост больше 0.01% - обновляем максимум (было 0.001% - слишком чувствительно)
-            # Новый максимум = конец старой сессии падения
-            # Обнуляем triggered_levels и устанавливаем новый минимум
-            print(f"[MAX UPDATE] {pair}: {state['local_max']:.4f} -> {current_price:.4f} (+{price_increase:.2f}%)")
+        if price_increase > 0.01:  # Рост больше 0.01% - обновляем максимум
+            print(f"[MAX UPDATE] {pair}: {state['local_max']:.4f} -> {current_price:.4f} (+{price_increase:.2f}%) | triggered_levels сохранены: {state.get('triggered_levels', [])}")
             self.state_manager.update_state(
                 pair,
                 local_max=current_price,
                 local_max_time=current_time,
-                local_min=current_price,  # Новый максимум = новый минимум
-                triggered_levels=[],  # Обнуляем уровни (новая сессия)
+                # НЕ обновляем local_min и НЕ обнуляем triggered_levels - это НЕ RESET!
+                # triggered_levels и local_min остаются для проверки RESET через should_reset()
                 last_price=current_price
             )
             if stats is not None:
                 stats["max_updated"] += 1
-            return None
+            # НЕ return None - продолжаем проверку уровней, так как RESET не произошёл
+            # (хотя сейчас уровни не должны сработать, так как цена выше максимума)
         
         # Обновление локального минимума (если цена ниже)
         if state["local_min"] is None or current_price < state["local_min"]:
