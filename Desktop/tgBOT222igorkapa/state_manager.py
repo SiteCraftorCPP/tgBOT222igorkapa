@@ -20,33 +20,71 @@ class StateManager:
         self.states: Dict[str, dict] = {}
         self.load_states()
     
-    def load_states(self):
-        """Загрузка состояний из файла"""
+    def load_states(self, silent: bool = False):
+        """Загрузка состояний из файла
+        
+        Args:
+            silent: Если True, не выводит сообщения (для перезагрузки между циклами)
+        """
         state_file_path = get_state_file_path()
         if os.path.exists(state_file_path):
             try:
                 with open(state_file_path, 'r', encoding='utf-8') as f:
-                    self.states = json.load(f)
-                print(f"[OK] Loaded {len(self.states)} pair states from {state_file_path}")
+                    loaded_states = json.load(f)
+                    
+                # КРИТИЧЕСКИ ВАЖНО: Полностью перезагружаем triggered_levels из файла
+                # Это гарантирует синхронизацию между циклами
+                for pair, state in loaded_states.items():
+                    if pair in self.states:
+                        # Полностью обновляем ключевые поля для защиты от дублей
+                        self.states[pair]["triggered_levels"] = state.get("triggered_levels", [])
+                        self.states[pair]["last_signal_time"] = state.get("last_signal_time")
+                        self.states[pair]["last_signal_level"] = state.get("last_signal_level")
+                    else:
+                        # Новая пара - добавляем полностью
+                        self.states[pair] = state
+                
+                if not silent:
+                    print(f"[OK] Loaded {len(loaded_states)} pair states from {state_file_path}")
             except Exception as e:
-                print(f"[ERROR] Failed to load states: {e}")
-                self.states = {}
+                if not silent:
+                    print(f"[ERROR] Failed to load states: {e}")
+                # Не очищаем self.states при ошибке - сохраняем текущее состояние в памяти
         else:
-            print(f"[INFO] State file not found at {state_file_path}, starting fresh")
-            self.states = {}
+            if not silent:
+                print(f"[INFO] State file not found at {state_file_path}, starting fresh")
+            # Не очищаем self.states если файла нет - может быть первая загрузка
     
     def save_states(self):
-        """Сохранение состояний в файл"""
+        """Сохранение состояний в файл с принудительной синхронизацией"""
         try:
             state_file_path = get_state_file_path()
             # Создаём директорию если её нет (для абсолютных путей)
             state_dir = os.path.dirname(state_file_path)
             if state_dir and not os.path.exists(state_dir):
                 os.makedirs(state_dir, exist_ok=True)
-            with open(state_file_path, 'w', encoding='utf-8') as f:
+            
+            # Записываем во временный файл, потом переименовываем (атомарная операция)
+            temp_file_path = state_file_path + ".tmp"
+            with open(temp_file_path, 'w', encoding='utf-8') as f:
                 json.dump(self.states, f, indent=2, ensure_ascii=False)
+                f.flush()  # Принудительно сбрасываем буфер в ОС
+                os.fsync(f.fileno())  # Принудительно синхронизируем с диском
+            
+            # Атомарное переименование (защита от race condition)
+            if os.path.exists(state_file_path):
+                os.replace(temp_file_path, state_file_path)
+            else:
+                os.rename(temp_file_path, state_file_path)
+                
         except Exception as e:
             print(f"[ERROR] Failed to save states to {state_file_path}: {e}")
+            # Пытаемся удалить временный файл при ошибке
+            try:
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+            except:
+                pass
     
     def get_state(self, pair: str) -> dict:
         """Получить состояние пары"""

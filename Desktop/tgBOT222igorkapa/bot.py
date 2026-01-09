@@ -67,6 +67,12 @@ class CryptoSignalBot:
                 print(f"  CYCLE #{cycle} | {datetime.now().strftime('%H:%M:%S')}")
                 print(f"{'='*60}")
                 
+                # КРИТИЧЕСКИ ВАЖНО: Перезагружаем состояние из файла в начале каждого цикла
+                # Это гарантирует, что triggered_levels синхронизирован с файлом между циклами
+                # (защита от рассинхронизации памяти и файла)
+                # Используем silent=True чтобы не спамить в лог каждый цикл
+                self.state_manager.load_states(silent=True)
+                
                 # Обновляем цены одним запросом
                 price_stats = self.market_monitor.refresh_prices()
                 if not price_stats:
