@@ -111,11 +111,30 @@ class StateManager:
         self.save_states()
     
     def reset_state(self, pair: str, new_price: float):
-        """Сброс состояния пары"""
-        print(f"[RESET] {pair}: new local max = {new_price}")
+        """Сброс состояния пары
+        
+        КРИТИЧЕСКИ ВАЖНО: При RESET сохраняем максимальное значение между старым local_max и новой ценой.
+        Это предотвращает ситуацию, когда после RESET процент падения становится меньше из-за того,
+        что local_max устанавливается на цену, которая ниже предыдущего максимума.
+        """
         current_time = time.time()
+        old_state = self.get_state(pair)
+        old_local_max = old_state.get("local_max")
+        
+        # Используем максимальное значение между старым local_max и новой ценой
+        # Это гарантирует, что процент падения не уменьшится после RESET
+        if old_local_max is not None and old_local_max > 0:
+            new_local_max = max(old_local_max, new_price)
+            if new_local_max != new_price:
+                print(f"[RESET] {pair}: preserving old local_max={old_local_max:.4f} (new_price={new_price:.4f} is lower)")
+            else:
+                print(f"[RESET] {pair}: updating local_max={old_local_max:.4f} -> {new_price:.4f} (price increased)")
+        else:
+            new_local_max = new_price
+            print(f"[RESET] {pair}: new local max = {new_price}")
+        
         self.states[pair] = {
-            "local_max": new_price,
+            "local_max": new_local_max,
             "local_max_time": current_time,  # Время установки нового максимума
             "local_min": new_price,
             "triggered_levels": [],
