@@ -182,8 +182,9 @@ class TelegramSender:
             self._save_cache()
         
         # Очистка старых записей по (pair, level) (старше 1 часа) - только для временных записей
+        # Ключи могут быть строками (начинающимися с "msg:") или tuple (для (pair, level))
         expired_keys = [k for k, v in self.sent_signals_cache.items() 
-                       if not k.startswith("msg:") and current_time - v > 3600]
+                       if isinstance(k, tuple) and isinstance(v, (int, float)) and v != float('inf') and current_time - v > 3600]
         for k in expired_keys:
             del self.sent_signals_cache[k]
         
