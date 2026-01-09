@@ -269,7 +269,7 @@ class CryptoSignalBot:
             self.state_manager.reset_state(pair, current_price)
             # Очищаем кэш сообщений для этой пары при RESET
             self.telegram.clear_cache_for_pair(pair)
-                return None
+            return None
         
         # Проверка условий для RESET
         if self.state_manager.should_reset(pair, current_price, current_time):
