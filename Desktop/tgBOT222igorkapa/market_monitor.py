@@ -85,7 +85,7 @@ class MarketMonitor:
         return pairs_data
     
     def filter_pairs(self) -> List[str]:
-        """Получить TOP пары по объёму торгов (ТОП-300)"""
+        """Получить TOP-100 пар по объёму торгов из Bit2Me"""
         pairs_data = self.get_all_eur_pairs()
         
         if not pairs_data:
@@ -99,11 +99,11 @@ class MarketMonitor:
             reverse=True
         )
         
-        # Берём ТОП-300 (или сколько есть)
-        top_pairs = sorted_pairs[:300]
+        # Берём ТОП-100 (или сколько есть)
+        top_pairs = sorted_pairs[:100]
         filtered = [p["symbol"] for p in top_pairs]
         
-        print(f"[OK] Selected {len(filtered)} top pairs by volume")
+        print(f"[OK] Selected {len(filtered)} top pairs by volume (from Bit2Me)")
         if len(filtered) > 0:
             print(f"     Top 10: {', '.join(filtered[:10])}")
         
