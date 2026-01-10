@@ -10,9 +10,9 @@ class TelegramSender:
     """Отправка сигналов в Telegram"""
     
     # Время блокировки дублей по (pair, level) - 10 минут (для защиты от race condition)
-    # Одинаковые сообщения блокируются навсегда (проверка по тексту)
-    DUPLICATE_BLOCK_TIME = 600  # Для (pair, level) - временная защита
-    MESSAGE_BLOCK_FOREVER = True  # Одинаковые сообщения блокируются навсегда
+    # Одинаковые сообщения блокируются на 24 часа (проверка по тексту)
+    DUPLICATE_BLOCK_TIME = 600  # Для (pair, level) - временная защита (10 минут)
+    MESSAGE_BLOCK_TIME = 86400  # Для одинаковых сообщений - 24 часа
     
     def __init__(self):
         self.bot_token = TELEGRAM_BOT_TOKEN
@@ -20,20 +20,20 @@ class TelegramSender:
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
     
         # КЭШ ОТПРАВЛЕННЫХ СИГНАЛОВ - последняя линия защиты от дублей
-        # Формат: {"msg:текст": float('inf'), (pair, level): timestamp}
+        # Формат: {"msg:текст": timestamp (блок на 24ч), (pair, level): timestamp (блок на 10мин)}
         self.cache_file = "sent_messages_cache.json"
         self.sent_signals_cache = self._load_cache()
     
     def _is_duplicate(self, pair: str, level: int, drop_percent: float = None, current_price: float = None) -> bool:
         """Проверить, не был ли этот сигнал уже отправлен
         
-        КРИТИЧЕСКИ ВАЖНО: Одинаковые сообщения блокируются НАВСЕГДА!
-        Если изменился уровень падения (процент), то это уже другое сообщение и оно пройдёт.
+        Одинаковые сообщения блокируются на 24 часа.
+        Если изменился уровень падения (процент) или цена, то это уже другое сообщение и оно пройдёт.
         """
         current_time = time.time()
         
-        # Проверка 1: по тексту сообщения (ГЛАВНАЯ ПРОВЕРКА - блокирует одинаковые сообщения навсегда)
-        # Если уровень падения изменился, текст изменится, и сообщение пройдёт
+        # Проверка 1: по тексту сообщения (ГЛАВНАЯ ПРОВЕРКА - блокирует одинаковые сообщения на 24 часа)
+        # Если уровень падения или цена изменились, текст изменится, и сообщение пройдёт
         if drop_percent is not None and current_price is not None:
             # Формируем текст сообщения ТОЧНО так же, как в send_signals_batch
             formatted_pair = pair.replace("EUR", "") + "/EUR"
@@ -46,24 +46,32 @@ class TelegramSender:
                 price_str = f"{current_price:.4f}€" if current_price < 1 else f"{current_price:.2f}€"
             message_text = f"💎 {formatted_pair} | −{drop_abs:.1f}% | {price_str}"
             
-            # Проверяем по тексту сообщения - если уже было, блокируем НАВСЕГДА
+            # Проверяем по тексту сообщения - если уже было, блокируем на 24 часа
             message_key = f"msg:{message_text}"
             print(f"[DUPLICATE CHECK] {pair}: checking message_text='{message_text}', cache_size={len(self.sent_signals_cache)}")
             
             if message_key in self.sent_signals_cache:
-                # Если значение float('inf'), значит блокировка навсегда
-                # Если обычное значение, проверяем время (но это не должно быть, т.к. мы используем float('inf'))
                 cache_value = self.sent_signals_cache[message_key]
                 print(f"[DUPLICATE CHECK] {pair}: FOUND in cache! cache_value={cache_value}")
                 
+                # Обрабатываем старые записи с float('inf') - конвертируем в timestamp
                 if cache_value == float('inf'):
-                    print(f"[DUPLICATE BLOCKED] ❌ {pair}: ОДИНАКОВОЕ сообщение уже отправлено (блок навсегда): {message_text}")
-                    return True
-                # На всякий случай проверяем и обычные значения (если они есть)
-                elif isinstance(cache_value, (int, float)) and cache_value != float('inf'):
-                    if current_time - cache_value < 86400:  # 24 часа для старых записей
-                        print(f"[DUPLICATE BLOCKED] ❌ {pair}: одинаковое сообщение уже отправлено: {message_text}")
+                    # Старые записи "навсегда" считаем как блокировку на 24 часа от текущего времени
+                    # Но лучше просто разрешим их через 24 часа от времени создания
+                    print(f"[DUPLICATE CHECK] {pair}: old 'inf' entry found, allowing after 24h check")
+                    # Удаляем старую запись с 'inf' и разрешаем отправку
+                    del self.sent_signals_cache[message_key]
+                    print(f"[DUPLICATE CHECK] {pair}: NOT in cache (removed old 'inf'), will send")
+                elif isinstance(cache_value, (int, float)):
+                    elapsed = current_time - cache_value
+                    if elapsed < self.MESSAGE_BLOCK_TIME:  # 24 часа
+                        hours_left = (self.MESSAGE_BLOCK_TIME - elapsed) / 3600
+                        print(f"[DUPLICATE BLOCKED] ❌ {pair}: ОДИНАКОВОЕ сообщение уже отправлено {elapsed/3600:.1f}ч назад (блок на {hours_left:.1f}ч): {message_text}")
                         return True
+                    else:
+                        # Время истекло, удаляем запись
+                        del self.sent_signals_cache[message_key]
+                        print(f"[DUPLICATE CHECK] {pair}: cache expired (>{self.MESSAGE_BLOCK_TIME/3600:.0f}h), will send")
             else:
                 print(f"[DUPLICATE CHECK] {pair}: NOT in cache, will send")
         
@@ -90,7 +98,8 @@ class TelegramSender:
                     result = {}
                     for k, v in cache.items():
                         if k.startswith("msg:"):
-                            result[k] = float('inf') if v == 'inf' else v
+                            # Старые записи с 'inf' конвертируем в 0 (разрешаем сразу)
+                            result[k] = 0 if v == 'inf' else v
                         elif k.startswith("tuple:"):
                             # Восстанавливаем tuple из строки "tuple:(pair,level)"
                             key_str = k.replace("tuple:", "")
@@ -117,8 +126,8 @@ class TelegramSender:
                 if isinstance(k, tuple):
                     cache_to_save[f"tuple:{k}"] = v
                 elif isinstance(k, str):
-                    # Сохраняем float('inf') как строку 'inf'
-                    cache_to_save[k] = 'inf' if v == float('inf') else v
+                    # Сохраняем timestamp (не используем 'inf' больше)
+                    cache_to_save[k] = v
                 else:
                     cache_to_save[str(k)] = v
             
@@ -165,7 +174,7 @@ class TelegramSender:
         Args:
             pair: Название пары
             level: Уровень сигнала
-            message_text: Текст сообщения (для блокировки одинаковых сообщений навсегда)
+            message_text: Текст сообщения (для блокировки одинаковых сообщений на 24 часа)
         """
         current_time = time.time()
         
@@ -173,11 +182,11 @@ class TelegramSender:
         key = (pair, level)
         self.sent_signals_cache[key] = current_time
         
-        # Сохраняем по тексту сообщения - БЛОКИРОВКА НАВСЕГДА
+        # Сохраняем по тексту сообщения - БЛОКИРОВКА НА 24 ЧАСА
         if message_text:
             message_key = f"msg:{message_text}"
-            # Используем специальное значение для "навсегда" (очень большое число)
-            self.sent_signals_cache[message_key] = float('inf')  # Навсегда
+            # Сохраняем timestamp для блокировки на 24 часа
+            self.sent_signals_cache[message_key] = current_time
             # НЕМЕДЛЕННО сохраняем в файл
             self._save_cache()
         
@@ -192,12 +201,20 @@ class TelegramSender:
         # Удаляем самые старые записи по сообщениям (но не те, что помечены как "навсегда")
         message_keys = [k for k in self.sent_signals_cache.keys() if k.startswith("msg:")]
         if len(message_keys) > 5000:
-            # Удаляем только те, что не помечены как "навсегда"
-            regular_message_keys = [k for k in message_keys if self.sent_signals_cache[k] != float('inf')]
+                # Удаляем только те, что старше 24 часов
+                current_time = time.time()
+                regular_message_keys = [k for k in message_keys 
+                                       if isinstance(self.sent_signals_cache[k], (int, float)) 
+                                       and current_time - self.sent_signals_cache[k] > self.MESSAGE_BLOCK_TIME]
             if len(regular_message_keys) > 0:
                 sorted_items = sorted([(k, self.sent_signals_cache[k]) for k in regular_message_keys], 
                                      key=lambda x: x[1])
-                for k, _ in sorted_items[:len(regular_message_keys) - 4500]:  # Оставляем 4500 + 500 "навсегда"
+                # Удаляем только устаревшие записи (старше 24 часов)
+                for k, _ in sorted_items:
+                    if current_time - _ > self.MESSAGE_BLOCK_TIME:
+                        del self.sent_signals_cache[k]
+                # Ограничиваем размер кэша (если всё ещё много)
+                if len([k for k in self.sent_signals_cache.keys() if isinstance(k, str) and k.startswith("msg:")]) > 5000:
                     del self.sent_signals_cache[k]
     
     def send_signals_batch(self, signals: list, market_monitor=None):
