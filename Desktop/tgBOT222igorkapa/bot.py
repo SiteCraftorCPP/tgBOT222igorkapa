@@ -81,13 +81,15 @@ class CryptoSignalBot:
                     continue
                 
                 # РАБОТАЕМ ТОЛЬКО С ПАРАМИ, ДЛЯ КОТОРЫХ API ВЕРНУЛ ДАННЫЕ!
-                available_pairs = list(self.market_monitor.prices_cache.keys())
+                # КРИТИЧЕСКИ ВАЖНО: Фильтруем только пары из исходного списка (топ-100), 
+                # а не все пары из prices_cache (который содержит все 232 пары)
+                available_pairs_from_cache = set(self.market_monitor.prices_cache.keys())
+                filtered_pairs = [p for p in pairs if p in available_pairs_from_cache]
                 
-                if len(available_pairs) != len(pairs):
-                    missing_count = len(pairs) - len(available_pairs)
-                    print(f"[WARNING] API returned data for {len(available_pairs)}/{len(pairs)} pairs ({missing_count} missing)")
-                    # Обновляем список пар на основе реальных данных от API
-                    pairs = available_pairs
+                if len(filtered_pairs) != len(pairs):
+                    missing_count = len(pairs) - len(filtered_pairs)
+                    print(f"[WARNING] API returned data for {len(filtered_pairs)}/{len(pairs)} pairs ({missing_count} missing)")
+                    pairs = filtered_pairs
                 
                 print(f"[OK] Processing {len(pairs)} pairs with valid API data")
                 
