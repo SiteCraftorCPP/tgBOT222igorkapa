@@ -198,14 +198,13 @@ class TelegramSender:
             del self.sent_signals_cache[k]
         
         # Ограничиваем размер кэша сообщений (максимум 5000 записей)
-        # Удаляем самые старые записи по сообщениям (но не те, что помечены как "навсегда")
+        # Удаляем только те, что старше 24 часов
         message_keys = [k for k in self.sent_signals_cache.keys() if k.startswith("msg:")]
         if len(message_keys) > 5000:
-                # Удаляем только те, что старше 24 часов
-                current_time = time.time()
-                regular_message_keys = [k for k in message_keys 
-                                       if isinstance(self.sent_signals_cache[k], (int, float)) 
-                                       and current_time - self.sent_signals_cache[k] > self.MESSAGE_BLOCK_TIME]
+            current_time = time.time()
+            regular_message_keys = [k for k in message_keys 
+                                   if isinstance(self.sent_signals_cache[k], (int, float)) 
+                                   and current_time - self.sent_signals_cache[k] > self.MESSAGE_BLOCK_TIME]
             if len(regular_message_keys) > 0:
                 sorted_items = sorted([(k, self.sent_signals_cache[k]) for k in regular_message_keys], 
                                      key=lambda x: x[1])
@@ -213,8 +212,13 @@ class TelegramSender:
                 for k, _ in sorted_items:
                     if current_time - _ > self.MESSAGE_BLOCK_TIME:
                         del self.sent_signals_cache[k]
-                # Ограничиваем размер кэша (если всё ещё много)
-                if len([k for k in self.sent_signals_cache.keys() if isinstance(k, str) and k.startswith("msg:")]) > 5000:
+            # Ограничиваем размер кэша (если всё ещё много, удаляем самые старые)
+            remaining_message_keys = [k for k in self.sent_signals_cache.keys() if k.startswith("msg:")]
+            if len(remaining_message_keys) > 5000:
+                sorted_all = sorted([(k, self.sent_signals_cache[k]) for k in remaining_message_keys], 
+                                   key=lambda x: x[1])
+                # Удаляем самые старые записи
+                for k, _ in sorted_all[:len(remaining_message_keys) - 5000]:
                     del self.sent_signals_cache[k]
     
     def send_signals_batch(self, signals: list, market_monitor=None):
