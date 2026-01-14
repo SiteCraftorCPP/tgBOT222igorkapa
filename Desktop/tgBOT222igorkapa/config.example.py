@@ -54,5 +54,31 @@ LEVELS = [
 STATE_FILE = "pairs_state.json"
 
 # API endpoints (не менять)
-BIT2ME_BASE_URL = "https://api.bit2me.com/v1"
+BIT2ME_BASE_URL = "https://gateway.bit2me.com/v1/trading"
+
+# Ссылка для покупки на Bit2Me
+BUY_LINK_TEMPLATE = "https://bit2me.com/es/precio/{coin}"
+
+# ============================================
+# СПИСОК ПАР ДЛЯ МОНИТОРИНГА
+# ============================================
+# Формат: "COIN/EUR" (например, "BTC/EUR")
+# Бот будет мониторить только пары из этого списка
+# Пары должны быть доступны на Bit2Me бирже
+
+MONITORED_PAIRS = [
+    "BTC/EUR", "ETH/EUR", "XRP/EUR", "SOL/EUR", "ADA/EUR", "DOGE/EUR",
+    "AVAX/EUR", "TAO/EUR", "GLMR/EUR", "MOVR/EUR", "KSM/EUR", "APT/EUR",
+    "CELO/EUR", "JST/EUR", "RSR/EUR", "TRU/EUR", "FLR/EUR", "VELODROME/EUR",
+    "ONDO/EUR", "PENDLE/EUR", "NOT/EUR", "PEAQ/EUR", "LSK/EUR", "KEEP/EUR",
+    "MLN/EUR", "AR/EUR", "SWEAT/EUR", "JOE/EUR", "PYTH/EUR", "CFG/EUR",
+    "ETHFI/EUR", "TNSR/EUR", "PUMP/EUR", "BNB/EUR", "DOT/EUR", "LINK/EUR",
+    "TRX/EUR", "LTC/EUR", "BCH/EUR", "XLM/EUR", "ATOM/EUR", "ALGO/EUR",
+    "NEAR/EUR", "FIL/EUR", "ETC/EUR", "XTZ/EUR", "UNI/EUR", "AAVE/EUR",
+    "CRV/EUR", "RUNE/EUR", "GRT/EUR", "ENJ/EUR", "BAT/EUR", "SAND/EUR",
+    "MANA/EUR", "AIOZ/EUR", "NPC/EUR", "CLANKER/EUR", "FLOKI/EUR", "METIS/EUR",
+    "SEI/EUR", "SUI/EUR", "ARB/EUR", "KAS/EUR", "STX/EUR", "SNX/EUR",
+    "COMP/EUR", "LDO/EUR", "DYDX/EUR", "AKT/EUR", "GALA/EUR", "SHIB/EUR",
+    "PEPE/EUR"
+]
 

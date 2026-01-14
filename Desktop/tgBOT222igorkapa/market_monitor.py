@@ -1,7 +1,7 @@
 import requests
 import time
 from typing import List, Dict, Optional
-from config import BIT2ME_BASE_URL, BIT2ME_API_KEY, LEVELS
+from config import BIT2ME_BASE_URL, BIT2ME_API_KEY, LEVELS, MONITORED_PAIRS
 
 
 class MarketMonitor:
@@ -84,31 +84,56 @@ class MarketMonitor:
         print(f"[OK] Got {len(pairs_data)} COIN/EUR pairs from Bit2Me")
         return pairs_data
     
+    def convert_pair_to_internal(self, pair_str: str) -> str:
+        """Конвертировать BTC/EUR -> BTCEUR"""
+        return pair_str.replace("/", "").replace("_", "")
+    
+    def convert_pair_to_bit2me(self, internal_pair: str) -> str:
+        """Конвертировать BTCEUR -> BTC_EUR"""
+        # Ищем последние 3 символа "EUR" и заменяем на "_EUR"
+        if internal_pair.endswith("EUR"):
+            coin = internal_pair[:-3]
+            return f"{coin}_EUR"
+        return internal_pair
+    
     def filter_pairs(self) -> List[str]:
-        """Получить TOP-100 пар по объёму торгов из Bit2Me"""
+        """Получить пары из заданного списка MONITORED_PAIRS"""
+        # Получаем все доступные пары с API
         pairs_data = self.get_all_eur_pairs()
         
         if not pairs_data:
-            print("[WARN] Could not get pairs, using fallback")
-            return ["BTCEUR", "ETHEUR", "BNBEUR", "XRPEUR", "ADAEUR"]
+            print("[WARN] Could not get pairs from API, using fallback")
+            # Конвертируем MONITORED_PAIRS в внутренний формат
+            fallback = [self.convert_pair_to_internal(p) for p in MONITORED_PAIRS]
+            return fallback[:5]  # Только первые 5 как fallback
         
-        # Сортируем по объёму торгов в EUR
-        sorted_pairs = sorted(
-            pairs_data,
-            key=lambda x: x["volume"],
-            reverse=True
-        )
+        # Создаём словарь для быстрого поиска: BTCEUR -> {symbol, bit2me_symbol, ...}
+        available_pairs_dict = {p["symbol"]: p for p in pairs_data}
         
-        # Берём ТОП-100 (или сколько есть)
-        top_pairs = sorted_pairs[:100]
-        filtered = [p["symbol"] for p in top_pairs]
+        # Конвертируем MONITORED_PAIRS в внутренний формат и фильтруем
+        filtered = []
+        symbol_mapping_dict = {}
+        missing_pairs = []
         
-        print(f"[OK] Selected {len(filtered)} top pairs by volume (from Bit2Me)")
+        for pair_str in MONITORED_PAIRS:
+            internal_pair = self.convert_pair_to_internal(pair_str)
+            
+            # Проверяем, есть ли пара в данных API
+            if internal_pair in available_pairs_dict:
+                filtered.append(internal_pair)
+                symbol_mapping_dict[internal_pair] = available_pairs_dict[internal_pair]["bit2me_symbol"]
+            else:
+                missing_pairs.append(pair_str)
+        
+        print(f"[OK] Selected {len(filtered)}/{len(MONITORED_PAIRS)} pairs from configured list")
         if len(filtered) > 0:
-            print(f"     Top 10: {', '.join(filtered[:10])}")
+            print(f"     First 10: {', '.join(filtered[:10])}")
+        
+        if missing_pairs:
+            print(f"[WARNING] {len(missing_pairs)} pairs not found in API: {', '.join(missing_pairs[:10])}")
         
         # Сохраняем маппинг для конвертации обратно в Bit2Me формат
-        self.symbol_mapping = {p["symbol"]: p["bit2me_symbol"] for p in top_pairs}
+        self.symbol_mapping = symbol_mapping_dict
         
         self.available_pairs = filtered
         return filtered
