@@ -25,6 +25,7 @@ class CryptoSignalBot:
         self.market_monitor = MarketMonitor()
         self.telegram = TelegramSender()
         self.running = False
+        self.signals_sent_count = 0  # Счётчик отправленных сигналов для промо
     
     def start(self):
         """Запуск бота"""
@@ -44,14 +45,14 @@ class CryptoSignalBot:
         print(f"[*] Check interval: {CHECK_INTERVAL} sec\n")
         
         # Отправляем статус в канал
-        self.telegram.send_status(
+        status_result = self.telegram.send_status(
             f"🤖 <b>Bot Started</b>\n\n"
             f"📊 Monitoring: <b>{len(pairs)}</b> EUR pairs\n"
             f"⏱ Interval: {CHECK_INTERVAL} sec\n"
-            f"📈 Signals: -8% от максимума, затем каждые -2% от последнего сигнала\n"
-            f"🔄 RESET: 24 часа ИЛИ +7% от минимума\n"
             f"🕐 {datetime.now().strftime('%H:%M:%S %d.%m.%Y')}"
         )
+        if not status_result:
+            print("[WARNING] Failed to send start status to Telegram")
         
         self.running = True
         self.main_loop(pairs)
@@ -225,7 +226,14 @@ class CryptoSignalBot:
                     
                     result = self.telegram.send_signals_batch(cycle_signals, self.market_monitor)
                     if result:
-                        print(f"[SIGNALS SENT] ✅ Successfully sent {len(cycle_signals)} signals")
+                        self.signals_sent_count += len(cycle_signals)
+                        print(f"[SIGNALS SENT] ✅ Successfully sent {len(cycle_signals)} signals (total: {self.signals_sent_count})")
+                        
+                        # Отправляем промо каждые 20 сигналов
+                        if self.signals_sent_count >= 20:
+                            print(f"[PROMO TRIGGER] {self.signals_sent_count} signals sent, sending promo message...")
+                            self.telegram.send_promo_message()
+                            self.signals_sent_count = 0  # Сбрасываем счётчик
                     else:
                         print(f"[SIGNALS SENT] ❌ Failed to send signals (result={result})")
                 else:

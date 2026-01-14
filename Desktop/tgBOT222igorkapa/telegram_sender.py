@@ -314,10 +314,8 @@ class TelegramSender:
                     print(f"[TELEGRAM ERROR] API returned error: {error_desc}")
                     raise Exception(f"API error: {error_desc}")
                 
-                response.raise_for_status()
-                
                 # ОТМЕЧАЕМ КАК ОТПРАВЛЕННЫЙ (для защиты от дублей)
-                # Сохраняем и по ключу (pair, level), и по тексту сообщения (НАВСЕГДА)
+                # Сохраняем и по ключу (pair, level), и по тексту сообщения
                 self._mark_as_sent(pair, level, message)
                 
                 sent_count += 1
@@ -355,7 +353,88 @@ class TelegramSender:
                 timeout=3
             )
             response.raise_for_status()
-            return True
+            result = response.json()
+            if result.get("ok"):
+                print(f"[STATUS SENT] Status message sent to chat {self.chat_id}")
+                return True
+            else:
+                error_desc = result.get("description", "Unknown error")
+                print(f"[ERROR] Failed to send status: {error_desc}")
+                return False
         except Exception as e:
-            print(f"[ERROR] Failed to send status: {e}")
+            error_msg = str(e).encode('ascii', errors='ignore').decode('ascii')
+            print(f"[ERROR] Failed to send status: {error_msg}")
+            return False
+    
+    def send_promo_message(self):
+        """Отправить промо-сообщение с кнопкой"""
+        try:
+            message = """🎉 Gana 20€ GRATIS con Bit2Me
+
+✨ Oferta exclusiva para nuestra comunidad
+
+Regístrate ahora, haz tu primera compra de +100€ y recibe 20€ de regalo 💸
+
+⚡️ Rápido · Fácil · Seguro"""
+            
+            buy_url = "https://now.bit2me.com/tradingmegabot"
+            
+            payload = {
+                "chat_id": self.chat_id,
+                "text": message,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                "reply_markup": {
+                    "inline_keyboard": [[{
+                        "text": "👉 REGÍSTRATE YA 🚀",
+                        "url": buy_url
+                    }]]
+                }
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/sendMessage",
+                json=payload,
+                timeout=3
+            )
+            response.raise_for_status()
+            result = response.json()
+            if result.get("ok"):
+                message_id = result.get("result", {}).get("message_id")
+                print(f"[PROMO SENT] Promo message sent to chat {self.chat_id}, message_id={message_id}")
+                return message_id
+            else:
+                error_desc = result.get("description", "Unknown error")
+                print(f"[ERROR] Failed to send promo: {error_desc}")
+                return None
+        except Exception as e:
+            error_msg = str(e).encode('ascii', errors='ignore').decode('ascii')
+            print(f"[ERROR] Failed to send promo: {error_msg}")
+            return None
+    
+    def delete_message(self, message_id: int):
+        """Удалить сообщение по message_id"""
+        try:
+            payload = {
+                "chat_id": self.chat_id,
+                "message_id": message_id
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/deleteMessage",
+                json=payload,
+                timeout=3
+            )
+            response.raise_for_status()
+            result = response.json()
+            if result.get("ok"):
+                print(f"[MESSAGE DELETED] Message {message_id} deleted from chat {self.chat_id}")
+                return True
+            else:
+                error_desc = result.get("description", "Unknown error")
+                print(f"[ERROR] Failed to delete message {message_id}: {error_desc}")
+                return False
+        except Exception as e:
+            error_msg = str(e).encode('ascii', errors='ignore').decode('ascii')
+            print(f"[ERROR] Failed to delete message {message_id}: {error_msg}")
             return False
