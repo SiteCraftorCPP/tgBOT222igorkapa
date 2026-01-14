@@ -1,7 +1,7 @@
 import requests
 import time
 from typing import List, Dict, Optional
-from config import BIT2ME_BASE_URL, BIT2ME_API_KEY, LEVELS, MONITORED_PAIRS
+from config import BIT2ME_BASE_URL, BIT2ME_API_KEY, MONITORED_PAIRS
 
 
 class MarketMonitor:
@@ -81,7 +81,7 @@ class MarketMonitor:
                         "volume": quote_volume  # Объём в EUR
                     })
         
-        print(f"[OK] Got {len(pairs_data)} COIN/EUR pairs from Bit2Me")
+        print(f"[OK] Got {len(pairs_data)} COIN/EUR pairs from Bit2Me API (will filter to MONITORED_PAIRS)")
         return pairs_data
     
     def convert_pair_to_internal(self, pair_str: str) -> str:
@@ -130,7 +130,11 @@ class MarketMonitor:
             print(f"     First 10: {', '.join(filtered[:10])}")
         
         if missing_pairs:
-            print(f"[WARNING] {len(missing_pairs)} pairs not found in API: {', '.join(missing_pairs[:10])}")
+            print(f"[WARNING] {len(missing_pairs)} pairs not found in API:")
+            # Показываем все отсутствующие пары, по 10 в строке
+            for i in range(0, len(missing_pairs), 10):
+                chunk = missing_pairs[i:i+10]
+                print(f"     Missing: {', '.join(chunk)}")
         
         # Сохраняем маппинг для конвертации обратно в Bit2Me формат
         self.symbol_mapping = symbol_mapping_dict
@@ -139,7 +143,7 @@ class MarketMonitor:
         return filtered
     
     def refresh_prices(self) -> bool:
-        """Обновить кэш цен (один запрос на все пары)"""
+        """Обновить кэш цен только для пар из MONITORED_PAIRS"""
         # Сохраняем старый кэш ДО очистки
         old_cache = {}
         if hasattr(self, 'prices_cache') and isinstance(self.prices_cache, dict):
@@ -154,6 +158,9 @@ class MarketMonitor:
             print(f"[ERROR] API returned invalid data (fetch time: {fetch_time:.2f}s)")
             return False
         
+        # Получаем список пар для мониторинга (только из MONITORED_PAIRS)
+        monitored_pairs_set = set(self.available_pairs) if hasattr(self, 'available_pairs') and self.available_pairs else set()
+        
         # Очищаем кэш для новых цен
         self.prices_cache = {}
         changes_count = 0
@@ -164,10 +171,17 @@ class MarketMonitor:
         processed_count = 0
         skipped_no_price = 0
         skipped_invalid = 0
+        skipped_not_monitored = 0
         
         for bit2me_symbol, info in data.items():
             if bit2me_symbol.endswith("_EUR") and isinstance(info, dict):
                 symbol = self.convert_pair_format(bit2me_symbol)
+                
+                # КРИТИЧЕСКИ ВАЖНО: обрабатываем только пары из MONITORED_PAIRS
+                if monitored_pairs_set and symbol not in monitored_pairs_set:
+                    skipped_not_monitored += 1
+                    continue
+                
                 last_price = info.get("last_price")
                 
                 if last_price is not None:
@@ -176,31 +190,29 @@ class MarketMonitor:
                         if new_price > 0:  # Проверяем, что цена валидна
                             self.prices_cache[symbol] = new_price
                             processed_count += 1
+                            
+                            # Считаем изменения (используем относительное сравнение для точности)
+                            if symbol in old_cache:
+                                old_price = old_cache[symbol]
+                                # Считаем изменение относительно старой цены (в процентах)
+                                if old_price > 0:
+                                    change_pct = abs((new_price - old_price) / old_price) * 100
+                                    if change_pct > 0.0001:  # Изменение больше 0.0001% (очень маленький порог)
+                                        changes_count += 1
+                                    else:
+                                        same_count += 1
+                                else:
+                                    if abs(old_price - new_price) > 0.00000001:
+                                        changes_count += 1
+                                    else:
+                                        same_count += 1
+                            else:
+                                # Новая пара (не было в предыдущем кэше)
+                                new_pairs += 1
                         else:
                             skipped_no_price += 1
                     except (ValueError, TypeError):
                         skipped_invalid += 1
-                        
-                        # ПРОВЕРКА: считаем изменения (используем относительное сравнение для точности)
-                        if symbol in old_cache:
-                            old_price = old_cache[symbol]
-                            # Считаем изменение относительно старой цены (в процентах)
-                            if old_price > 0:
-                                change_pct = abs((new_price - old_price) / old_price) * 100
-                                if change_pct > 0.0001:  # Изменение больше 0.0001% (очень маленький порог)
-                                    changes_count += 1
-                                else:
-                                    same_count += 1
-                            else:
-                                if abs(old_price - new_price) > 0.00000001:
-                                    changes_count += 1
-                                else:
-                                    same_count += 1
-                        else:
-                            # Новая пара (не было в предыдущем кэше)
-                            new_pairs += 1
-                    except (ValueError, TypeError):
-                        pass
         
         # Собираем статистику для возврата
         total_checked = changes_count + same_count
@@ -220,19 +232,19 @@ class MarketMonitor:
             if changes_count == 0 and same_count > 0:
                 print(f"[WARNING] API returned ZERO price changes! All {same_count} pairs have identical prices from previous cycle.")
                 print(f"[WARNING] Possible causes: API caching, frozen market, or API not updating data.")
-            elif changes_count < 10 and total_checked > 100:
-                print(f"[WARNING] Very few price changes ({changes_count}/{total_checked}). Market might be low volatility or API has caching issues.")
+            elif changes_count < 5 and total_checked > 20:
+                print(f"[WARNING] Very few price changes ({changes_count}/{total_checked} monitored pairs). Market might be low volatility or API has caching issues.")
         else:
             stats["change_pct"] = 0
             if new_pairs > 0:
                 # Первый цикл или все пары новые
                 pass
         
-        # ДИАГНОСТИКА: показываем, сколько пар обработано
+        # ДИАГНОСТИКА: показываем, сколько пар обработано (только из MONITORED_PAIRS)
         if processed_count == 0:
-            print(f"[ERROR] ZERO pairs processed from API! Skipped: no_price={skipped_no_price}, invalid={skipped_invalid}")
-        elif len(self.prices_cache) < 100:
-            print(f"[WARNING] Only {len(self.prices_cache)} pairs in cache! Processed: {processed_count}, Skipped: no_price={skipped_no_price}, invalid={skipped_invalid}")
+            print(f"[ERROR] ZERO monitored pairs processed from API! Skipped: no_price={skipped_no_price}, invalid={skipped_invalid}, not_monitored={skipped_not_monitored}")
+        elif len(self.prices_cache) < len(monitored_pairs_set) * 0.8:  # Меньше 80% от ожидаемого количества
+            print(f"[WARNING] Only {len(self.prices_cache)}/{len(monitored_pairs_set)} monitored pairs in cache! Processed: {processed_count}, Skipped: no_price={skipped_no_price}, invalid={skipped_invalid}")
         
         if len(self.prices_cache) > 0:
             return stats
@@ -243,42 +255,3 @@ class MarketMonitor:
         """Получить текущую цену пары из кэша"""
         return self.prices_cache.get(pair)
     
-    def check_levels(self, pair: str, current_price: float, local_max: float, triggered_levels: List[int]) -> Optional[Dict]:
-        """Проверить, не пересечён ли новый уровень падения
-        
-        Args:
-            pair: Название пары
-            current_price: Текущая цена
-            local_max: Локальный максимум
-            triggered_levels: Список уже сработавших уровней
-        """
-        if local_max is None or local_max == 0:
-            return None
-        
-        drop_percent = ((current_price - local_max) / local_max) * 100
-        
-        # Логируем проверку уровней для отладки дублей
-        if drop_percent <= -8.0:  # Только для значительных падений
-            print(f"[CHECK LEVELS] {pair}: drop={drop_percent:.2f}%, triggered_levels={triggered_levels}, max={local_max:.4f}, price={current_price:.4f}")
-        
-        for level_info in LEVELS:
-            level = level_info["level"]
-            threshold = level_info["drop"]
-            
-            # Если уровень уже сработал, пропускаем
-            if level in triggered_levels:
-                if drop_percent <= threshold:  # Логируем только если падение достигло этого уровня
-                    print(f"[CHECK LEVELS] {pair}: Level {level} ({threshold}%) already triggered, skipping (drop={drop_percent:.2f}%)")
-                continue
-            
-            # Если падение достигло этого уровня - возвращаем сигнал
-            if drop_percent <= threshold:
-                print(f"[CHECK LEVELS] {pair}: Level {level} ({threshold}%) TRIGGERED! drop={drop_percent:.2f}%, triggered_levels={triggered_levels}")
-                return {
-                    "level": level,
-                    "drop_percent": drop_percent,
-                    "current_price": current_price,
-                    "local_max": local_max
-                }
-        
-        return None

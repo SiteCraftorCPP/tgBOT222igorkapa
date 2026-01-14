@@ -91,14 +91,14 @@ class StateManager:
         if pair not in self.states:
             self.states[pair] = {
                 "local_max": None,
-                "local_max_time": None,  # Время установки локального максимума
+                "local_max_time": None,
                 "local_min": None,
-                "triggered_levels": [],
+                "last_signal_price": None,  # Цена последнего сигнала (для расчёта следующего -2%)
                 "last_signal_time": None,
-                "last_signal_level": None,  # Последний отправленный уровень (для защиты от дублей)
+                "last_signal_level": None,  # Номер последнего сигнала (1, 2, 3, ...)
                 "last_price": None,
                 "last_update": time.time(),
-                "initialized": False,  # Флаг инициализации (не отправлять сигналы сразу)
+                "initialized": False,
                 "initialization_time": None
             }
         return self.states[pair]
@@ -111,145 +111,61 @@ class StateManager:
         self.save_states()
     
     def reset_state(self, pair: str, new_price: float):
-        """Сброс состояния пары
-        
-        КРИТИЧЕСКИ ВАЖНО: При RESET сохраняем максимальное значение между старым local_max и новой ценой.
-        Это предотвращает ситуацию, когда после RESET процент падения становится меньше из-за того,
-        что local_max устанавливается на цену, которая ниже предыдущего максимума.
-        """
+        """Сброс состояния пары - обнуляет всё кроме local_max"""
         current_time = time.time()
         old_state = self.get_state(pair)
-        old_local_max = old_state.get("local_max")
         
-        # Используем максимальное значение между старым local_max и новой ценой
-        # Это гарантирует, что процент падения не уменьшится после RESET
-        if old_local_max is not None and old_local_max > 0:
-            new_local_max = max(old_local_max, new_price)
-            if new_local_max != new_price:
-                print(f"[RESET] {pair}: preserving old local_max={old_local_max:.4f} (new_price={new_price:.4f} is lower)")
-            else:
-                print(f"[RESET] {pair}: updating local_max={old_local_max:.4f} -> {new_price:.4f} (price increased)")
-        else:
-            new_local_max = new_price
-            print(f"[RESET] {pair}: new local max = {new_price}")
+        # Устанавливаем новый local_max (текущая цена)
+        print(f"[RESET] {pair}: Setting new local_max={new_price:.4f}")
         
         self.states[pair] = {
-            "local_max": new_local_max,
-            "local_max_time": current_time,  # Время установки нового максимума
+            "local_max": new_price,
+            "local_max_time": current_time,
             "local_min": new_price,
-            "triggered_levels": [],
+            "last_signal_price": None,  # Обнуляем цену последнего сигнала
             "last_signal_time": None,
-            "last_signal_level": None,  # Сбрасываем последний отправленный уровень
+            "last_signal_level": None,
             "last_price": new_price,
             "last_update": current_time,
-            "initialized": True,  # После RESET считаем инициализированным
+            "initialized": True,
             "initialization_time": current_time
         }
         self.save_states()
     
-    def check_local_max_age(self, pair: str, current_time: float) -> bool:
-        """Проверить, не устарел ли локальный максимум (4 часа)"""
-        state = self.get_state(pair)
-        local_max_time = state.get("local_max_time")
-        
-        if local_max_time is None:
-            return False
-        
-        from config import LOCAL_MAX_PERIOD
-        age = current_time - local_max_time
-        
-        if age >= LOCAL_MAX_PERIOD:
-            print(f"[RESET] {pair}: local max expired ({age/3600:.1f}h old)")
-            return True
-        
-        return False
-    
-    def get_reset_percent_for_drop(self, max_drop_percent: float) -> float:
-        """Получить процент отскока для RESET в зависимости от максимального падения
-        
-        Правила RESET:
-        - если падение было −5% → RESET при росте +2%
-        - если падение было −9% → RESET при росте +3%
-        - если падение было −13% → RESET при росте +4%
-        - если падение было −17% → RESET при росте +5%
-        - если падение было −21% → RESET при росте +6%
-        """
-        if max_drop_percent >= -5.0:
-            return 2.0  # Падение от 0% до -5% → RESET при +2%
-        elif max_drop_percent >= -9.0:
-            return 3.0  # Падение от -5% до -9% → RESET при +3%
-        elif max_drop_percent >= -13.0:
-            return 4.0  # Падение от -9% до -13% → RESET при +4%
-        elif max_drop_percent >= -17.0:
-            return 5.0  # Падение от -13% до -17% → RESET при +5%
-        elif max_drop_percent >= -21.0:
-            return 6.0  # Падение от -17% до -21% → RESET при +6%
-        else:
-            return 7.0  # Падение глубже -21% → RESET при +7%
     
     def should_reset(self, pair: str, current_price: float, current_time: float) -> bool:
-        """Проверка условий для сброса состояния"""
-        state = self.get_state(pair)
+        """Проверка условий для сброса состояния
         
-        # Условие 1: прошло 2 часа с последнего сигнала
-        if state["last_signal_time"] is not None:
-            from config import RESET_TIME
-            if current_time - state["last_signal_time"] >= RESET_TIME:
-                print(f"[RESET] {pair}: 2 hours since last signal")
-                return True
-        
-        # Условие 2: цена выросла на нужный процент от локального минимума
-        # Процент зависит от максимального падения (не уровня, а процента!)
-        if state["local_min"] is not None and state["local_min"] > 0 and state["local_max"] is not None and state["local_max"] > 0:
-            # Считаем максимальное падение от максимума до минимума
-            max_drop_percent = ((state["local_min"] - state["local_max"]) / state["local_max"]) * 100
-            
-            # Получаем нужный процент отскока для RESET в зависимости от максимального падения
-            required_growth_percent = self.get_reset_percent_for_drop(max_drop_percent)
-            
-            # Считаем фактический рост от минимума
-            growth = ((current_price - state["local_min"]) / state["local_min"]) * 100
-            
-            if growth >= required_growth_percent:
-                drop_info = f" (max drop={max_drop_percent:.2f}%, required={required_growth_percent}%)"
-                print(f"[RESET] {pair}: +{growth:.2f}% growth from min{drop_info}")
-                return True
-        
-        return False
-    
-    def is_duplicate_signal(self, pair: str, level: int, current_time: float) -> bool:
-        """Проверить, не является ли сигнал дубликатом
-        
-        Блокирует если:
-        1. Уровень уже в triggered_levels
-        2. Тот же уровень отправлялся менее 10 минут назад
+        RESET происходит если:
+        1. Прошло 24 часа с последнего сигнала
+        2. Цена выросла на +7% от локального минимума
         """
         state = self.get_state(pair)
         
-        # Проверка 1: уровень уже сработал
-        if level in state.get("triggered_levels", []):
-            print(f"[DUPLICATE CHECK] {pair}: Level {level} already in triggered_levels")
-            return True
+        # Условие 1: прошло 24 часа с последнего сигнала
+        if state["last_signal_time"] is not None:
+            from config import RESET_TIME
+            elapsed = current_time - state["last_signal_time"]
+            if elapsed >= RESET_TIME:
+                print(f"[RESET] {pair}: 24 hours ({elapsed/3600:.1f}h) since last signal")
+                return True
         
-        # Проверка 2: тот же уровень отправлялся недавно (защита от race condition)
-        last_level = state.get("last_signal_level")
-        last_time = state.get("last_signal_time")
-        
-        if last_level == level and last_time is not None:
-            elapsed = current_time - last_time
-            if elapsed < 600:  # 10 минут
-                print(f"[DUPLICATE CHECK] {pair}: Level {level} was sent {elapsed:.0f}s ago (< 600s)")
+        # Условие 2: цена выросла на +7% от локального минимума
+        if state["local_min"] is not None and state["local_min"] > 0:
+            from config import RESET_GROWTH_PERCENT
+            growth = ((current_price - state["local_min"]) / state["local_min"]) * 100
+            
+            if growth >= RESET_GROWTH_PERCENT:
+                print(f"[RESET] {pair}: +{growth:.2f}% growth from min (required: {RESET_GROWTH_PERCENT}%)")
                 return True
         
         return False
     
-    def add_triggered_level(self, pair: str, level: int, current_time: float):
-        """Добавить сработавший уровень"""
+    def update_signal(self, pair: str, level: int, signal_price: float, current_time: float):
+        """Обновить информацию о последнем сигнале"""
         state = self.get_state(pair)
-        if level not in state["triggered_levels"]:
-            state["triggered_levels"].append(level)
-            state["last_signal_time"] = current_time
-            state["last_signal_level"] = level  # Сохраняем последний отправленный уровень
-            # НЕМЕДЛЕННО сохраняем в файл
-            self.save_states()
-            print(f"[STATE SAVED] {pair}: Level {level} saved to triggered_levels, file updated")
+        state["last_signal_level"] = level
+        state["last_signal_price"] = signal_price
+        state["last_signal_time"] = current_time
+        self.save_states()
+        print(f"[STATE SAVED] {pair}: Level {level} saved, signal_price={signal_price:.4f}")
