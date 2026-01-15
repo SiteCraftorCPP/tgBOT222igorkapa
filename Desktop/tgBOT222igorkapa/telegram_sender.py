@@ -199,7 +199,8 @@ class TelegramSender:
         
         # Ограничиваем размер кэша сообщений (максимум 5000 записей)
         # Удаляем только те, что старше 24 часов
-        message_keys = [k for k in self.sent_signals_cache.keys() if k.startswith("msg:")]
+        # Ключи могут быть строками или кортежами - проверяем тип
+        message_keys = [k for k in self.sent_signals_cache.keys() if isinstance(k, str) and k.startswith("msg:")]
         if len(message_keys) > 5000:
             current_time = time.time()
             regular_message_keys = [k for k in message_keys 
@@ -213,7 +214,7 @@ class TelegramSender:
                     if current_time - _ > self.MESSAGE_BLOCK_TIME:
                         del self.sent_signals_cache[k]
             # Ограничиваем размер кэша (если всё ещё много, удаляем самые старые)
-            remaining_message_keys = [k for k in self.sent_signals_cache.keys() if k.startswith("msg:")]
+            remaining_message_keys = [k for k in self.sent_signals_cache.keys() if isinstance(k, str) and k.startswith("msg:")]
             if len(remaining_message_keys) > 5000:
                 sorted_all = sorted([(k, self.sent_signals_cache[k]) for k in remaining_message_keys], 
                                    key=lambda x: x[1])
