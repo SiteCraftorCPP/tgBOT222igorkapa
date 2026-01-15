@@ -348,13 +348,17 @@ class CryptoSignalBot:
             if levels_passed > 0:
                 # Прошли один или несколько уровней - отправляем только последний
                 new_level = last_signal_level + levels_passed
+                # Для последующих сигналов показываем падение от последнего сигнала (а не от максимума)
+                # Это более информативно, т.к. сигнал триггерится именно на падение от последнего сигнала
+                # Но в логах показываем оба значения
                 signal = {
                     "pair": pair,
                     "level": new_level,
-                    "drop_percent": drop_from_max,  # Падение от максимума для отображения
+                    "drop_percent": drop_from_last_signal,  # Падение от последнего сигнала для отображения
+                    "drop_from_max": drop_from_max,  # Общее падение от максимума (для логирования)
                     "current_price": current_price
                 }
-                print(f"[SIGNAL] {pair}: NEXT signal (level {new_level}) | {drop_from_last_signal:.2f}% from last_signal | total {drop_from_max:.2f}% from max | levels_passed={levels_passed}")
+                print(f"[SIGNAL] {pair}: NEXT signal (level {new_level}) | drop_from_last={drop_from_last_signal:.2f}% | drop_from_max={drop_from_max:.2f}% | levels_passed={levels_passed}")
         
         if signal:
             # Сохраняем сигнал
