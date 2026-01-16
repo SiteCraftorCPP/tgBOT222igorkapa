@@ -285,11 +285,17 @@ class CryptoSignalBot:
         # Обновление локального максимума (если цена выше)
         if current_price > state["local_max"]:
             print(f"[MAX UPDATE] {pair}: {state['local_max']:.4f} -> {current_price:.4f}")
+            # КРИТИЧЕСКИ ВАЖНО: Если local_max обновился, сбрасываем last_signal_price
+            # Потому что старый last_signal_price больше не актуален для нового максимума
             self.state_manager.update_state(
                 pair,
                 local_max=current_price,
                 local_max_time=current_time,
-                last_price=current_price
+                last_price=current_price,
+                last_signal_price=None,  # Сбрасываем, т.к. максимум обновился
+                last_signal_level=None,
+                last_signal_time=None,
+                last_signal_drop_percent=None  # Сбрасываем процент падения
             )
             if stats is not None:
                 stats["max_updated"] += 1
@@ -325,6 +331,13 @@ class CryptoSignalBot:
         signal = None
         last_signal_price = current_state.get("last_signal_price")
         last_signal_level = current_state.get("last_signal_level")
+        last_signal_drop_percent = current_state.get("last_signal_drop_percent")
+        
+        # Проверка согласованности: если last_signal_price is None, то last_signal_drop_percent тоже должен быть None
+        if last_signal_price is None and last_signal_drop_percent is not None:
+            print(f"[WARN] {pair}: Inconsistent state - last_signal_price is None but last_signal_drop_percent={last_signal_drop_percent:.2f}%, resetting")
+            self.state_manager.update_state(pair, last_signal_drop_percent=None)
+            last_signal_drop_percent = None
         
         if last_signal_price is None:
             # Ещё не было сигналов - проверяем первый уровень (-8% от local_max)
@@ -339,9 +352,44 @@ class CryptoSignalBot:
                 print(f"[SIGNAL] {pair}: FIRST signal (level 1) | {drop_from_max:.2f}% | price={current_price:.4f}")
         else:
             # Уже были сигналы - проверяем падение от last_signal_price
+            
+            # КРИТИЧЕСКИ ВАЖНО: Если last_signal_drop_percent не установлен (старые данные),
+            # вычисляем его на основе last_signal_price и local_max для совместимости
+            if last_signal_drop_percent is None:
+                if current_state["local_max"] and current_state["local_max"] > 0:
+                    last_signal_drop_percent = ((last_signal_price - current_state["local_max"]) / current_state["local_max"]) * 100
+                    print(f"[WARN] {pair}: last_signal_drop_percent was None, computed: {last_signal_drop_percent:.2f}%")
+                    # Сохраняем вычисленное значение
+                    self.state_manager.update_state(pair, last_signal_drop_percent=last_signal_drop_percent)
+                else:
+                    print(f"[ERROR] {pair}: Cannot compute last_signal_drop_percent, local_max is invalid")
+                    return None
+            
+            # КРИТИЧЕСКИ ВАЖНО: СНАЧАЛА проверяем, что текущее падение от local_max БОЛЬШЕ (по модулю)
+            # чем было при последнем сигнале. Сигналы должны идти ТОЛЬКО по возрастанию падения!
+            # Если drop_from_max > last_signal_drop_percent (например, -5% > -11.7%), это откат - НЕ отправляем!
+            if drop_from_max > last_signal_drop_percent:
+                # Текущее падение меньше (по модулю) чем было при последнем сигнале - это откат, не отправляем
+                print(f"[SKIP] {pair}: Current drop {drop_from_max:.2f}% > last signal drop {last_signal_drop_percent:.2f}% (price recovered, no signal)")
+                return None
+            
+            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: текущее падение должно быть СТРОГО меньше (больше по модулю)
+            # Если они равны (с точностью до 0.01%), тоже не отправляем
+            if abs(drop_from_max - last_signal_drop_percent) < 0.01:
+                print(f"[SKIP] {pair}: Current drop {drop_from_max:.2f}% == last signal drop {last_signal_drop_percent:.2f}% (same level, no signal)")
+                return None
+            
+            # Теперь проверяем падение от last_signal_price
             drop_from_last_signal = ((current_price - last_signal_price) / last_signal_price) * 100
             
-            # Сколько уровней по -2% прошли?
+            # КРИТИЧЕСКИ ВАЖНО: Проверяем, что цена действительно упала от last_signal_price
+            # Если цена выросла (drop_from_last_signal > 0), сигнал НЕ отправляем
+            if drop_from_last_signal >= 0:
+                # Цена выросла или не изменилась - сигнал не нужен
+                print(f"[SKIP] {pair}: Price rose from last signal ({drop_from_last_signal:.2f}%), no signal")
+                return None
+            
+            # Сколько уровней по -2% прошли? (drop_from_last_signal уже отрицательное)
             from config import NEXT_SIGNAL_DROP
             levels_passed = int(abs(drop_from_last_signal / abs(NEXT_SIGNAL_DROP)))
             
@@ -356,15 +404,16 @@ class CryptoSignalBot:
                     "drop_percent": drop_from_max,  # Общий процент падения от local_max для отображения
                     "current_price": current_price
                 }
-                print(f"[SIGNAL] {pair}: NEXT signal (level {new_level}) | drop_from_last={drop_from_last_signal:.2f}% | drop_from_max={drop_from_max:.2f}% | levels_passed={levels_passed}")
+                print(f"[SIGNAL] {pair}: NEXT signal (level {new_level}) | drop_from_last={drop_from_last_signal:.2f}% | drop_from_max={drop_from_max:.2f}% (was {last_signal_drop_percent:.2f}%) | levels_passed={levels_passed}")
         
         if signal:
-            # Сохраняем сигнал
+            # Сохраняем сигнал (передаём drop_percent для проверки следующего сигнала)
             self.state_manager.update_signal(
                 pair,
                 signal["level"],
                 current_price,
-                current_time
+                current_time,
+                signal["drop_percent"]  # Передаём процент падения от local_max
             )
             
             # Подсчёт статистики

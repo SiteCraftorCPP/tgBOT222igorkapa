@@ -40,6 +40,7 @@ class StateManager:
                         self.states[pair]["triggered_levels"] = state.get("triggered_levels", [])
                         self.states[pair]["last_signal_time"] = state.get("last_signal_time")
                         self.states[pair]["last_signal_level"] = state.get("last_signal_level")
+                        self.states[pair]["last_signal_drop_percent"] = state.get("last_signal_drop_percent")
                     else:
                         # Новая пара - добавляем полностью
                         self.states[pair] = state
@@ -48,7 +49,7 @@ class StateManager:
                     print(f"[OK] Loaded {len(loaded_states)} pair states from {state_file_path}")
             except Exception as e:
                 if not silent:
-                    print(f"[ERROR] Failed to load states: {e}")
+                print(f"[ERROR] Failed to load states: {e}")
                 # Не очищаем self.states при ошибке - сохраняем текущее состояние в памяти
         else:
             if not silent:
@@ -96,6 +97,7 @@ class StateManager:
                 "last_signal_price": None,  # Цена последнего сигнала (для расчёта следующего -2%)
                 "last_signal_time": None,
                 "last_signal_level": None,  # Номер последнего сигнала (1, 2, 3, ...)
+                "last_signal_drop_percent": None,  # Процент падения от local_max при последнем сигнале
                 "last_price": None,
                 "last_update": time.time(),
                 "initialized": False,
@@ -125,6 +127,7 @@ class StateManager:
             "last_signal_price": None,  # Обнуляем цену последнего сигнала
             "last_signal_time": None,
             "last_signal_level": None,
+            "last_signal_drop_percent": None,  # Обнуляем процент падения последнего сигнала
             "last_price": new_price,
             "last_update": current_time,
             "initialized": True,
@@ -161,11 +164,20 @@ class StateManager:
         
         return False
     
-    def update_signal(self, pair: str, level: int, signal_price: float, current_time: float):
-        """Обновить информацию о последнем сигнале"""
+    def update_signal(self, pair: str, level: int, signal_price: float, current_time: float, drop_percent: float):
+        """Обновить информацию о последнем сигнале
+        
+        Args:
+            pair: Торговая пара
+            level: Номер уровня сигнала
+            signal_price: Цена при сигнале
+            current_time: Время сигнала
+            drop_percent: Процент падения от local_max при этом сигнале
+        """
         state = self.get_state(pair)
         state["last_signal_level"] = level
         state["last_signal_price"] = signal_price
         state["last_signal_time"] = current_time
+        state["last_signal_drop_percent"] = drop_percent  # Сохраняем процент падения
         self.save_states()
-        print(f"[STATE SAVED] {pair}: Level {level} saved, signal_price={signal_price:.4f}")
+        print(f"[STATE SAVED] {pair}: Level {level} saved, signal_price={signal_price:.4f}, drop={drop_percent:.2f}%")
