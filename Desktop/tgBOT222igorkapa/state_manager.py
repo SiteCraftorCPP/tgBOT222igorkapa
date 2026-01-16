@@ -49,7 +49,7 @@ class StateManager:
                     print(f"[OK] Loaded {len(loaded_states)} pair states from {state_file_path}")
             except Exception as e:
                 if not silent:
-                print(f"[ERROR] Failed to load states: {e}")
+                    print(f"[ERROR] Failed to load states: {e}")
                 # Не очищаем self.states при ошибке - сохраняем текущее состояние в памяти
         else:
             if not silent:
