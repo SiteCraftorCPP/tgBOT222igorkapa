@@ -117,7 +117,7 @@ class MarketMonitor:
         
         for pair_str in MONITORED_PAIRS:
             internal_pair = self.convert_pair_to_internal(pair_str)
-            
+        
             # Проверяем, есть ли пара в данных API
             if internal_pair in available_pairs_dict:
                 filtered.append(internal_pair)

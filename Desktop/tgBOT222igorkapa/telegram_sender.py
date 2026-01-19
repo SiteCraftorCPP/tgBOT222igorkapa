@@ -223,7 +223,7 @@ class TelegramSender:
                     del self.sent_signals_cache[k]
     
     def send_signals_batch(self, signals: list, market_monitor=None):
-        """Отправить список сигналов - каждый отдельным сообщением с инлайн кнопкой
+        """Отправить список сигналов - каждый отдельным сообщением
         
         Args:
             signals: Список сигналов для отправки
@@ -278,21 +278,12 @@ class TelegramSender:
                 # drop уже отрицательный, используем длинный минус (U+2212)
                 drop_abs = abs(drop)
                 message = f"💎 {formatted_pair} | −{drop_abs:.1f}% | {price_str}"
-                
-                # Создаём инлайн кнопку для этого сигнала
-                buy_url = "https://now.bit2me.com/tradingmegabot"
-                
+
                 payload = {
                     "chat_id": self.chat_id,
                     "text": message,
                     "parse_mode": "Markdown",
-                    "disable_web_page_preview": True,
-                    "reply_markup": {
-                        "inline_keyboard": [[{
-                            "text": "🚀 COMPRAR + 20€ GRATIS",
-                            "url": buy_url
-                        }]]
-                    }
+                    "disable_web_page_preview": True
                 }
                 
                 print(f"[TELEGRAM] Sending to {self.chat_id}: {message}")
@@ -301,7 +292,7 @@ class TelegramSender:
                     json=payload,
                     timeout=3
                 )
-                
+
                 print(f"[TELEGRAM] Response status: {response.status_code}")
                 
                 if response.status_code != 200:
@@ -322,14 +313,14 @@ class TelegramSender:
                 sent_count += 1
                 message_id = result.get("result", {}).get("message_id", "N/A")
                 print(f"[SIGNAL SENT] ✅ {formatted_pair}: {message} | Message ID: {message_id}")
-                
+
             except Exception as e:
                 failed_count += 1
                 print(f"[ERROR] ❌ Failed to send signal for {pair} Level {level}: {e}")
                 import traceback
                 print(f"[ERROR] Traceback:")
                 traceback.print_exc()
-        
+
         if sent_count > 0 or blocked_count > 0:
             print(f"[BATCH COMPLETE] Sent {sent_count}/{len(signals)} signals (failed: {failed_count}, blocked duplicates: {blocked_count})")
         
